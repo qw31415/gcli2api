@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request, status
+from fastapi.responses import JSONResponse
+import os
 from fastapi.staticfiles import StaticFiles
 
 # Import all routers
@@ -88,14 +91,33 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS中间件
+# CORS中间件（可通过环境变量限制来源）
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+allow_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()] if allowed_origins_env else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 可选IP白名单（通过 ALLOWED_IPS=ip1,ip2,... 控制）
+allowed_ips_env = os.getenv("ALLOWED_IPS", "").strip()
+allowed_ips = [ip.strip() for ip in allowed_ips_env.split(",") if ip.strip()]
+
+@app.middleware("http")
+async def ip_whitelist_middleware(request: Request, call_next):
+    if allowed_ips:
+        # 兼容反向代理：优先 X-Forwarded-For
+        xff = request.headers.get("x-forwarded-for", "")
+        client_ip = (xff.split(",")[0].strip() if xff else (request.client.host if request.client else ""))
+        if client_ip not in allowed_ips:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"error": {"message": "Forbidden IP"}}
+            )
+    return await call_next(request)
 
 # 挂载路由器
 # OpenAI兼容路由 - 处理OpenAI格式请求
