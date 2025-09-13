@@ -133,6 +133,50 @@ async def openai_request_to_gemini_payload(openai_request: ChatCompletionRequest
         "safetySettings": DEFAULT_SAFETY_SETTINGS,
     }
     
+    # Tools mapping (OpenAI -> Gemini functionDeclarations) and tool_choice -> toolConfig
+    try:
+        if getattr(openai_request, "tools", None):
+            fn_decls = []
+            for tool in (openai_request.tools or []):
+                if isinstance(tool, dict) and tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+                    f = tool["function"]
+                    name = f.get("name")
+                    if not name:
+                        continue
+                    desc = f.get("description")
+                    params = f.get("parameters")
+                    fn_decl = {"name": name}
+                    if desc:
+                        fn_decl["description"] = desc
+                    if params:
+                        fn_decl["parameters"] = params
+                    fn_decls.append(fn_decl)
+            if fn_decls:
+                request_data.setdefault("tools", [])
+                request_data["tools"].append({"functionDeclarations": fn_decls})
+        tool_choice = getattr(openai_request, "tool_choice", None)
+        if tool_choice is not None:
+            mode = "AUTO"
+            allowed = None
+            if isinstance(tool_choice, str):
+                if tool_choice.lower() == "none":
+                    mode = "NONE"
+                elif tool_choice.lower() in ("auto", "required"):
+                    mode = "AUTO"
+            elif isinstance(tool_choice, dict):
+                if tool_choice.get("type") == "function":
+                    mode = "ANY"
+                    fn = tool_choice.get("function", {})
+                    if isinstance(fn, dict) and fn.get("name"):
+                        allowed = [fn.get("name")]
+            request_data.setdefault("toolConfig", {})
+            fc = {"mode": mode}
+            if allowed:
+                fc["allowedFunctionNames"] = allowed
+            request_data["toolConfig"]["functionCallingConfig"] = fc
+    except Exception as e:
+        log.debug(f"tools mapping skipped: {e}")
+    
     # 如果有系统消息且未启用兼容性模式，添加systemInstruction
     if system_instructions and not compatibility_mode:
         combined_system_instruction = "\n\n".join(system_instructions)

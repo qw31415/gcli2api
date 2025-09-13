@@ -34,6 +34,14 @@
 
 ## 核心功能
 
+## ���Ĺ���（本次修复要点）
+
+本次修复重点：
+- MCP/工具调用：OpenAI `tools`/`tool_choice` 自动映射到 Gemini `tools.functionDeclarations` 与 `toolConfig.functionCallingConfig`；模型返回的函数调用会按 OpenAI 规范回传 `tool_calls`（流式为 `delta.tool_calls`，非流式为 `message.tool_calls`）。
+- 流式抗截断：解决“自动重连后覆盖已输出内容”的问题。对 OpenAI 流式输出增加“重复前缀裁剪”，只向下游继续发送增量内容，避免覆盖或重复。
+- 图床上传：新增对 Gemini 原生（流式/非流式）的图片改写能力。若启用图床，会将内联 `inlineData` 图片转为 Markdown 外链；OpenAI 兼容通路也保留了把 `data:` 图片自动上传并替换为外链的实现。
+- 速率/凭证：429 自动重试 + 凭证轮转强化，失败不“停摆”。支持在面板或环境变量调整重试次数与间隔；用足 500+ 凭证资源。
+
 ### 🔄 API 端点和格式支持
 
 **多端点双格式支持**
@@ -800,3 +808,46 @@ npx https://github.com/google-gemini/gemini-cli
 - 遵守相关的服务条款和法律法规
 
 项目作者对因使用本项目而产生的任何直接或间接损失不承担责任。
+## 配置与环境变量（新增）
+
+图床上传（可选，建议开启以减少大体积 base64 回传）：
+- `PICGO_UPLOAD_ENABLED=true|false` 开启后服务端会在生成回复中自动上传检测到的内联图片；
+- `PICGO_API_KEY` 图床 API Key（Chevereto/PicGo 兼容接口）；
+- `PICGO_UPLOAD_URL` 图床上传接口（默认 `https://www.picgo.net/api/1/upload`，按你的图床服务调整）。
+
+429 重试与凭证轮转：
+- `RETRY_429_ENABLED=true` 开启 429 自动重试；
+- `RETRY_429_MAX_RETRIES=5` 最大重试次数；
+- `RETRY_429_INTERVAL=1` 重试间隔秒数；
+- `CALLS_PER_ROTATION=100` 每个凭证最大调用次数后自动轮转。
+
+服务端鉴权：
+- `API_PASSWORD`（或 `PASSWORD` 兼容）用于聊天接口；
+- `PANEL_PASSWORD` 面板登录口令；
+- Gemini 原生接口也支持 `Authorization: Bearer`、`x-goog-api-key` 或 `?key=`。
+
+兼容行为：
+- `COMPATIBILITY_MODE=true`（默认）时，将 `system` 转为用户消息以增强兼容性；
+- 思维链/思考内容：按模型名后缀 `-maxthinking`/`-nothinking` 自动配置 `thinkingConfig`，并保留 `reasoning_content` 字段。
+
+## 部署与推送
+
+建议将本仓库 Fork/设置远程后推送：
+```bash
+git add -A
+git commit -m "feat: MCP tools, anti-trunc streaming delta, image-bed"
+git push origin fix/gemini-preview-image-mcp
+```
+
+Render/Zeabur 环境注意：
+- 设置上面的环境变量；
+- 凭证可批量导入（ZIP）并在面板中启用；
+- 如遇配额/速率限制，服务端会自动轮换凭证并重试；
+- 抗截断模型名可使用中文前缀“流式抗截断/xxx”或在 OpenAI 流式模式下自动生效（避免覆盖/重复）。
+
+## 验收建议
+
+- OpenAI 工具调用回传：用一个简单工具 schema + `tool_choice` 测试，确认 `tool_calls` 能被你的 CLI 消费；
+- 图片回传：让模型“生成并展示一张图”，确认回答中出现 Markdown 外链；
+- 抗截断：触发长回答并观察重连后不覆盖已输出内容；
+- 429 场景：主动压测，确认自动轮转凭证与重试后仍能继续输出。

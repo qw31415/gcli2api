@@ -192,6 +192,9 @@ class AntiTruncationStreamProcessor:
     async def process_stream(self) -> AsyncGenerator[bytes, None]:
         """处理流式响应，检测并处理截断"""
         
+        # Track emitted text for cross-attempt delta trimming
+        if not hasattr(self, '_emitted_text'):
+            self._emitted_text = ""
         while self.current_attempt < self.max_attempts:
             self.current_attempt += 1
             

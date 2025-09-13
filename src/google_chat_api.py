@@ -26,6 +26,7 @@ from .httpx_client import http_client, create_streaming_client_with_kwargs
 from log import log
 from .credential_manager import CredentialManager
 from .usage_stats import record_successful_call
+from .image_uploader import transform_gemini_parts_images
 from .utils import get_user_agent
 
 def _create_error_response(message: str, status_code: int = 500) -> Response:
@@ -85,6 +86,37 @@ async def _prepare_request_headers_and_payload(payload: dict, credential_data: d
     }
     
     return headers, final_payload
+
+async def _rewrite_response_images(resp_obj: dict) -> dict:
+    """Rewrite Gemini response/candidate parts to include image-bed Markdown links.
+    Mutates a shallow copy and returns it; on error, returns original object.
+    """
+    try:
+        if not isinstance(resp_obj, dict):
+            return resp_obj
+        modified = dict(resp_obj)
+        candidates = modified.get("candidates")
+        if not isinstance(candidates, list):
+            return modified
+        new_cands = []
+        for cand in candidates:
+            if not isinstance(cand, dict):
+                new_cands.append(cand)
+                continue
+            new_cand = dict(cand)
+            content = new_cand.get("content")
+            if isinstance(content, dict):
+                new_content = dict(content)
+                parts = new_content.get("parts")
+                if isinstance(parts, list):
+                    new_content["parts"] = await transform_gemini_parts_images(parts)
+                new_cand["content"] = new_content
+            new_cands.append(new_cand)
+        modified["candidates"] = new_cands
+        return modified
+    except Exception as e:
+        log.debug(f"_rewrite_response_images failed: {e}")
+        return resp_obj
 
 async def send_gemini_request(payload: dict, is_streaming: bool = False, credential_manager: CredentialManager = None) -> Response:
     """
@@ -414,6 +446,10 @@ def _handle_streaming_response_managed(resp, stream_ctx, client, credential_mana
                     obj = json.loads(payload)
                     if "response" in obj:
                         data = obj["response"]
+                        try:
+                            data = await _rewrite_response_images(data)
+                        except Exception:
+                            pass
                         yield f"data: {json.dumps(data, separators=(',',':'))}\n\n".encode()
                         await asyncio.sleep(0)  # 让其他协程有机会运行
                         
@@ -468,8 +504,13 @@ async def _handle_non_streaming_response(resp, credential_manager: CredentialMan
             log.debug(f"Google API原始响应: {json.dumps(google_api_response, ensure_ascii=False)[:500]}...")
             standard_gemini_response = google_api_response.get("response")
             log.debug(f"提取的response字段: {json.dumps(standard_gemini_response, ensure_ascii=False)[:500]}...")
+            # Ensure image parts are rewritten for clients expecting Markdown
+            try:
+                _rewritten = await _rewrite_response_images(standard_gemini_response)
+            except Exception:
+                _rewritten = standard_gemini_response
             return Response(
-                content=json.dumps(standard_gemini_response),
+                content=json.dumps(_rewritten),
                 status_code=200,
                 media_type="application/json; charset=utf-8"
             )
