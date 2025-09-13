@@ -732,6 +732,24 @@ def build_gemini_payload_from_native(native_request: dict, model_from_path: str)
         thinking_config["includeThoughts"] = should_include_thoughts(model_from_path)
     if "thinkingBudget" not in thinking_config:
         thinking_config["thinkingBudget"] = get_thinking_budget(model_from_path)
+
+    # 对生图/预览图像模型，去除 thinkingConfig，避免 Vertex 报错
+    try:
+        wants_image = False
+        modalities = generation_config.get("responseModalities")
+        if isinstance(modalities, list) and any(str(m).upper() == "IMAGE" for m in modalities):
+            wants_image = True
+        name_low = str(model_from_path).lower()
+        if ("image-preview" in name_low) or ("flash-image" in name_low):
+            wants_image = True
+        thinking_provided = isinstance(native_request, dict) and isinstance(native_request.get("generationConfig", {}).get("thinkingConfig", None), dict)
+        if wants_image and ("thinkingConfig" in generation_config) and not thinking_provided:
+            try:
+                del generation_config["thinkingConfig"]
+            except Exception:
+                pass
+    except Exception:
+        pass
     
     # 为搜索模型添加Google Search工具（如果未指定且没有functionDeclarations）
     if is_search_model(model_from_path):
