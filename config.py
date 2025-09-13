@@ -21,12 +21,25 @@ DEFAULT_SAFETY_SETTINGS = [
 
 # Helper function to get base model name from any variant
 def get_base_model_name(model_name):
-    """Convert variant model name to base model name."""
-    # Remove all possible suffixes in order
+    """Convert variant model name to base model name.
+    - Strips feature suffixes (maxthinking/nothinking/search)
+    - Normalizes common date/version tails like -preview-06-05 or -06-05 to the family base
+    """
+    # Remove feature suffixes
     suffixes = ["-maxthinking", "-nothinking", "-search"]
     for suffix in suffixes:
         if model_name.endswith(suffix):
-            return model_name[:-len(suffix)]
+            model_name = model_name[:-len(suffix)]
+
+    # Normalize preview/date tails (e.g., -preview-06-05, -05-06)
+    # Keep conservative: strip trailing -preview-XX-XX or -XX-XX if present
+    import re
+    # -preview-06-05, -preview-2024-06-05, etc.
+    model_name = re.sub(r"-preview-\d{2}-\d{2}$", "", model_name)
+    model_name = re.sub(r"-preview-\d{4}-\d{2}-\d{2}$", "", model_name)
+    # -06-05 or -2024-06-05
+    model_name = re.sub(r"-\d{2}-\d{2}$", "", model_name)
+    model_name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model_name)
     return model_name
 
 # Helper function to check if model uses search grounding

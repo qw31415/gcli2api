@@ -26,6 +26,7 @@ from .httpx_client import http_client, create_streaming_client_with_kwargs
 from log import log
 from .credential_manager import CredentialManager
 from .usage_stats import record_successful_call
+from .image_uploader import transform_gemini_parts_images
 from .utils import get_user_agent
 
 def _create_error_response(message: str, status_code: int = 500) -> Response:
@@ -85,6 +86,37 @@ async def _prepare_request_headers_and_payload(payload: dict, credential_data: d
     }
     
     return headers, final_payload
+
+async def _rewrite_response_images(resp_obj: dict) -> dict:
+    """Rewrite Gemini response/candidate parts to include image-bed Markdown links.
+    Mutates a shallow copy and returns it; on error, returns original object.
+    """
+    try:
+        if not isinstance(resp_obj, dict):
+            return resp_obj
+        modified = dict(resp_obj)
+        candidates = modified.get("candidates")
+        if not isinstance(candidates, list):
+            return modified
+        new_cands = []
+        for cand in candidates:
+            if not isinstance(cand, dict):
+                new_cands.append(cand)
+                continue
+            new_cand = dict(cand)
+            content = new_cand.get("content")
+            if isinstance(content, dict):
+                new_content = dict(content)
+                parts = new_content.get("parts")
+                if isinstance(parts, list):
+                    new_content["parts"] = await transform_gemini_parts_images(parts)
+                new_cand["content"] = new_content
+            new_cands.append(new_cand)
+        modified["candidates"] = new_cands
+        return modified
+    except Exception as e:
+        log.debug(f"_rewrite_response_images failed: {e}")
+        return resp_obj
 
 async def send_gemini_request(payload: dict, is_streaming: bool = False, credential_manager: CredentialManager = None) -> Response:
     """
@@ -203,6 +235,44 @@ async def send_gemini_request(payload: dict, is_streaming: bool = False, credent
                         except Exception as e:
                             log.debug(f"[STREAMING] Failed to read error response content: {e}")
                         
+                        # 对于部分模型(如预览/图像预览)流式端点可能不存在，404时降级为非流式并以伪流式输出
+                        if resp.status_code == 404:
+                            # 清理当前流资源
+                            try:
+                                await stream_ctx.__aexit__(None, None, None)
+                            except:
+                                pass
+                            try:
+                                await client.aclose()
+                            except:
+                                pass
+
+                            # 调用非流式端点
+                            try:
+                                nonstream_url = f"{await get_code_assist_endpoint()}/v1internal:generateContent"
+                                async with http_client.get_client(timeout=None) as fallback_client:
+                                    non_resp = await fallback_client.post(
+                                        nonstream_url, content=final_post_data, headers=headers
+                                    )
+                                    non_std = await _handle_non_streaming_response(non_resp, credential_manager, payload.get("model", ""), current_file)
+                                    # 读取标准Gemini响应json文本
+                                    if hasattr(non_std, 'body'):
+                                        body_str = non_std.body.decode() if isinstance(non_std.body, bytes) else str(non_std.body)
+                                    elif hasattr(non_std, 'content'):
+                                        body_str = non_std.content.decode() if isinstance(non_std.content, bytes) else str(non_std.content)
+                                    else:
+                                        body_str = str(non_std)
+
+                                    async def pseudo_stream():
+                                        # 直接将标准gemini响应包一条SSE数据，再发送DONE
+                                        yield f"data: {body_str}\n\n"
+                                        yield "data: [DONE]\n\n"
+
+                                    return StreamingResponse(pseudo_stream(), media_type="text/event-stream", status_code=200)
+                            except Exception as fe:
+                                log.error(f"Fallback to non-streaming failed: {fe}")
+                                # 继续按错误流处理
+
                         # 显示详细的错误信息
                         if response_content:
                             log.error(f"Google API returned status {resp.status_code} (STREAMING). Response details: {response_content[:500]}")
@@ -223,7 +293,7 @@ async def send_gemini_request(payload: dict, is_streaming: bool = False, credent
                         # 处理凭证轮换
                         await _handle_api_error(credential_manager, resp.status_code, response_content)
                         
-                        # 返回错误流
+                        # 返回错误流（非404或降级失败）
                         async def error_stream():
                             error_response = {
                                 "error": {
@@ -376,6 +446,10 @@ def _handle_streaming_response_managed(resp, stream_ctx, client, credential_mana
                     obj = json.loads(payload)
                     if "response" in obj:
                         data = obj["response"]
+                        try:
+                            data = await _rewrite_response_images(data)
+                        except Exception:
+                            pass
                         yield f"data: {json.dumps(data, separators=(',',':'))}\n\n".encode()
                         await asyncio.sleep(0)  # 让其他协程有机会运行
                         
@@ -430,8 +504,13 @@ async def _handle_non_streaming_response(resp, credential_manager: CredentialMan
             log.debug(f"Google API原始响应: {json.dumps(google_api_response, ensure_ascii=False)[:500]}...")
             standard_gemini_response = google_api_response.get("response")
             log.debug(f"提取的response字段: {json.dumps(standard_gemini_response, ensure_ascii=False)[:500]}...")
+            # Ensure image parts are rewritten for clients expecting Markdown
+            try:
+                _rewritten = await _rewrite_response_images(standard_gemini_response)
+            except Exception:
+                _rewritten = standard_gemini_response
             return Response(
-                content=json.dumps(standard_gemini_response),
+                content=json.dumps(_rewritten),
                 status_code=200,
                 media_type="application/json; charset=utf-8"
             )

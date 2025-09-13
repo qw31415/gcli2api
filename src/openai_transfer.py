@@ -133,6 +133,50 @@ async def openai_request_to_gemini_payload(openai_request: ChatCompletionRequest
         "safetySettings": DEFAULT_SAFETY_SETTINGS,
     }
     
+    # Tools mapping (OpenAI -> Gemini functionDeclarations) and tool_choice -> toolConfig
+    try:
+        if getattr(openai_request, "tools", None):
+            fn_decls = []
+            for tool in (openai_request.tools or []):
+                if isinstance(tool, dict) and tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+                    f = tool["function"]
+                    name = f.get("name")
+                    if not name:
+                        continue
+                    desc = f.get("description")
+                    params = f.get("parameters")
+                    fn_decl = {"name": name}
+                    if desc:
+                        fn_decl["description"] = desc
+                    if params:
+                        fn_decl["parameters"] = params
+                    fn_decls.append(fn_decl)
+            if fn_decls:
+                request_data.setdefault("tools", [])
+                request_data["tools"].append({"functionDeclarations": fn_decls})
+        tool_choice = getattr(openai_request, "tool_choice", None)
+        if tool_choice is not None:
+            mode = "AUTO"
+            allowed = None
+            if isinstance(tool_choice, str):
+                if tool_choice.lower() == "none":
+                    mode = "NONE"
+                elif tool_choice.lower() in ("auto", "required"):
+                    mode = "AUTO"
+            elif isinstance(tool_choice, dict):
+                if tool_choice.get("type") == "function":
+                    mode = "ANY"
+                    fn = tool_choice.get("function", {})
+                    if isinstance(fn, dict) and fn.get("name"):
+                        allowed = [fn.get("name")]
+            request_data.setdefault("toolConfig", {})
+            fc = {"mode": mode}
+            if allowed:
+                fc["allowedFunctionNames"] = allowed
+            request_data["toolConfig"]["functionCallingConfig"] = fc
+    except Exception as e:
+        log.debug(f"tools mapping skipped: {e}")
+    
     # 如果有系统消息且未启用兼容性模式，添加systemInstruction
     if system_instructions and not compatibility_mode:
         combined_system_instruction = "\n\n".join(system_instructions)
@@ -162,20 +206,36 @@ async def openai_request_to_gemini_payload(openai_request: ChatCompletionRequest
     }
 
 def _extract_content_and_reasoning(parts: list) -> tuple:
-    """从Gemini响应部件中提取内容和推理内容"""
+    """从Gemini响应部件中提取内容和推理内容，同时忽略非文本部件"""
     content = ""
     reasoning_content = ""
-    
+
     for part in parts:
         # 处理文本内容
         if part.get("text"):
-            # 检查这个部件是否包含thinking tokens
             if part.get("thought", False):
                 reasoning_content += part.get("text", "")
             else:
                 content += part.get("text", "")
-    
+
     return content, reasoning_content
+
+def _extract_first_image_markdown(parts: list) -> str:
+    """从parts中提取第一张图片，转换为Markdown的data URI形式返回。未找到则返回空串。"""
+    # 兼容不同字段命名：inlineData/inline_data, fileData/file_data
+    for part in parts:
+        inline = part.get("inlineData") or part.get("inline_data")
+        if inline and isinstance(inline, dict):
+            b64 = inline.get("data")
+            if b64:
+                mime = inline.get("mimeType") or inline.get("mime_type") or "image/png"
+                return f"\n\n![image](data:{mime};base64,{b64})"
+        file_d = part.get("fileData") or part.get("file_data")
+        if file_d and isinstance(file_d, dict):
+            uri = file_d.get("fileUri") or file_d.get("file_uri")
+            if uri:
+                return f"\n\n![image]({uri})"
+    return ""
 
 def _build_message_with_reasoning(role: str, content: str, reasoning_content: str) -> dict:
     """构建包含可选推理内容的消息对象"""
@@ -213,6 +273,8 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         # 提取并分离thinking tokens和常规内容
         parts = candidate.get("content", {}).get("parts", [])
         content, reasoning_content = _extract_content_and_reasoning(parts)
+        # 若包含图片，转为Markdown内联或URI追加到content
+        content += _extract_first_image_markdown(parts)
         
         # 构建消息对象
         message = _build_message_with_reasoning(role, content, reasoning_content)
@@ -255,6 +317,8 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
         # 提取并分离thinking tokens和常规内容
         parts = candidate.get("content", {}).get("parts", [])
         content, reasoning_content = _extract_content_and_reasoning(parts)
+        # 流式块若带有图片，直接在该块中输出一次Markdown
+        content += _extract_first_image_markdown(parts)
         
         # 构建delta对象
         delta = {}

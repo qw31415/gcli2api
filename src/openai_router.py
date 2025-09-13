@@ -20,6 +20,8 @@ from .google_chat_api import send_gemini_request
 from .models import ChatCompletionRequest, ModelList, Model
 from .task_manager import create_managed_task
 from .openai_transfer import openai_request_to_gemini_payload, gemini_response_to_openai, gemini_stream_chunk_to_openai
+from .image_uploader import upload_data_uri_to_picgo, upload_remote_image_to_picgo
+import re
 
 # 创建路由器
 router = APIRouter()
@@ -47,7 +49,7 @@ async def authenticate(credentials: HTTPAuthorizationCredentials = Depends(secur
     return token
 
 @router.get("/v1/models", response_model=ModelList)
-async def list_models():
+async def list_models(token: str = Depends(authenticate)):
     """返回OpenAI格式的模型列表"""
     models = get_available_models("openai")
     return ModelList(data=[Model(id=m) for m in models])
@@ -183,6 +185,58 @@ async def chat_completions(
         
         log.debug(f"Response data keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'Not a dict'}")
         openai_response = gemini_response_to_openai(response_data, model)
+        # MCP/Tools: propagate Gemini functionCall -> OpenAI tool_calls for non-streaming
+        try:
+            tool_calls_by_index = {}
+            for cand in response_data.get("candidates", []) or []:
+                idx = cand.get("index", 0)
+                parts = cand.get("content", {}).get("parts", [])
+                for p in parts:
+                    fc = p.get("functionCall") or p.get("function_call")
+                    if isinstance(fc, dict) and fc.get("name"):
+                        import json as _json
+                        args_json = _json.dumps(fc.get("args") or fc.get("arguments") or {})
+                        tool_calls_by_index.setdefault(idx, []).append({
+                            "id": f"call_{str(uuid.uuid4())[:8]}",
+                            "type": "function",
+                            "function": {"name": fc.get("name"), "arguments": args_json}
+                        })
+            if tool_calls_by_index:
+                for ch in openai_response.get("choices", []):
+                    idx = ch.get("index", 0)
+                    if idx in tool_calls_by_index:
+                        ch.setdefault("message", {}).setdefault("tool_calls", []).extend(tool_calls_by_index[idx])
+        except Exception:
+            pass
+        # 可选：将内联data URI图片上传到图床并替换为外链
+        # 同时重托管远程图片链接为图床URL（最佳努力）
+        try:
+            pattern = re.compile(r"!\[image\]\((data:[^)]+)\)")
+            for ch in openai_response.get("choices", []):
+                msg = ch.get("message", {})
+                content = msg.get("content")
+                if isinstance(content, str):
+                    for m in pattern.finditer(content):
+                        url = await upload_data_uri_to_picgo(m.group(1))
+                        if url:
+                            content = content.replace(m.group(0), f"![image]({url})")
+                    msg["content"] = content
+        except Exception as _:
+            pass
+        # Rehost remote Markdown image links to image bed (best-effort)
+        try:
+            pattern_http = re.compile(r"!\[image\]\(((?:https?|http)://[^)]+)\)")
+            for ch in openai_response.get("choices", []):
+                msg = ch.get("message", {})
+                content = msg.get("content")
+                if isinstance(content, str):
+                    for m in pattern_http.finditer(content):
+                        hosted = await upload_remote_image_to_picgo(m.group(1))
+                        if hosted:
+                            content = content.replace(m.group(0), f"![image]({hosted})")
+                    msg["content"] = content
+        except Exception:
+            pass
         log.debug(f"Converted OpenAI response keys: {list(openai_response.keys()) if isinstance(openai_response, dict) else 'Not a dict'}")
         return JSONResponse(content=openai_response)
         
@@ -260,11 +314,13 @@ async def fake_stream_response(api_payload: dict, cred_mgr: CredentialManager) -
                 reasoning_content = ""
                 if "candidates" in response_data and response_data["candidates"]:
                     # Gemini格式响应 - 使用思维链分离
-                    from .openai_transfer import _extract_content_and_reasoning
+                    from .openai_transfer import _extract_content_and_reasoning, _extract_first_image_markdown
                     candidate = response_data["candidates"][0]
                     if "content" in candidate and "parts" in candidate["content"]:
                         parts = candidate["content"]["parts"]
                         content, reasoning_content = _extract_content_and_reasoning(parts)
+                        # 若包含图片，将其以Markdown内联追加
+                        content += _extract_first_image_markdown(parts)
                 elif "choices" in response_data and response_data["choices"]:
                     # OpenAI格式响应
                     content = response_data["choices"][0].get("message", {}).get("content", "")
@@ -279,6 +335,16 @@ async def fake_stream_response(api_payload: dict, cred_mgr: CredentialManager) -
                 
                 if content:
                     # 构建响应块，包括思维内容（如果有）
+                    # 可选：上传data URI到图床，替换为外链Markdown
+                    try:
+                        pattern = re.compile(r"!\[image\]\((data:[^)]+)\)")
+                        for m in pattern.finditer(content):
+                            url = await upload_data_uri_to_picgo(m.group(1))
+                            if url:
+                                content = content.replace(m.group(0), f"![image]({url})")
+                    except Exception:
+                        pass
+
                     delta = {"role": "assistant", "content": content}
                     if reasoning_content:
                         delta["reasoning_content"] = reasoning_content
@@ -333,6 +399,8 @@ async def convert_streaming_response(gemini_response, model: str) -> StreamingRe
     response_id = str(uuid.uuid4())
     
     async def openai_stream_generator():
+        # Track content already emitted to prevent overwriting when anti-truncation restarts
+        _accumulated_text = ""
         try:
             # 处理不同类型的响应对象
             if hasattr(gemini_response, 'body_iterator'):
@@ -354,6 +422,66 @@ async def convert_streaming_response(gemini_response, model: str) -> StreamingRe
                     try:
                         gemini_chunk = json.loads(payload.decode())
                         openai_chunk = gemini_stream_chunk_to_openai(gemini_chunk, model, response_id)
+                        # MCP/Tools: propagate Gemini functionCall -> OpenAI tool_calls in streaming
+                        try:
+                            for cand in gemini_chunk.get("candidates", []) or []:
+                                parts = cand.get("content", {}).get("parts", [])
+                                tool_calls = []
+                                for p in parts:
+                                    fc = p.get("functionCall") or p.get("function_call")
+                                    if isinstance(fc, dict) and fc.get("name"):
+                                        import json as _json
+                                        args_json = _json.dumps(fc.get("args") or fc.get("arguments") or {})
+                                        tool_calls.append({
+                                            "id": f"call_{str(uuid.uuid4())[:8]}",
+                                            "type": "function",
+                                            "function": {"name": fc.get("name"), "arguments": args_json}
+                                        })
+                                if tool_calls:
+                                    for ch in openai_chunk.get("choices", []):
+                                        ch.setdefault("delta", {}).setdefault("tool_calls", []).extend(tool_calls)
+                        except Exception:
+                            pass
+                        # Trim duplicate prefixes to ensure downstream append-only semantics
+                        try:
+                            for ch in openai_chunk.get("choices", []):
+                                delta = ch.get("delta", {})
+                                text = delta.get("content")
+                                if isinstance(text, str) and text:
+                                    max_overlap = min(len(_accumulated_text), len(text))
+                                    overlap = 0
+                                    for i in range(max_overlap, 0, -1):
+                                        if _accumulated_text.endswith(text[:i]):
+                                            overlap = i
+                                            break
+                                    to_send = text[overlap:]
+                                    if not to_send:
+                                        # skip empty duplicate chunk
+                                        raise StopIteration
+                                    delta["content"] = to_send
+                                    _accumulated_text += to_send
+                        except StopIteration:
+                            continue
+                        # 将chunk中的data URI图片上传并替换为外链
+                        try:
+                            pattern = re.compile(r"!\[image\]\((data:[^)]+)\)")
+                            for ch in openai_chunk.get("choices", []):
+                                delta = ch.get("delta", {})
+                                content = delta.get("content")
+                                if isinstance(content, str):
+                                    for m in pattern.finditer(content):
+                                        url = await upload_data_uri_to_picgo(m.group(1))
+                                        if url:
+                                            content = content.replace(m.group(0), f"![image]({url})")
+                                    # Remote images: try to rehost
+                                    pattern_http = re.compile(r"!\[image\]\(((?:https?|http)://[^)]+)\)")
+                                    for m in pattern_http.finditer(content):
+                                        hosted = await upload_remote_image_to_picgo(m.group(1))
+                                        if hosted:
+                                            content = content.replace(m.group(0), f"![image]({hosted})")
+                                    delta["content"] = content
+                        except Exception:
+                            pass
                         yield f"data: {json.dumps(openai_chunk, separators=(',',':'))}\n\n".encode()
                     except json.JSONDecodeError:
                         continue
