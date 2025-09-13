@@ -34,7 +34,7 @@
 
 ## 核心功能
 
-## ���Ĺ���（本次修复要点）
+##（本次修复要点）
 
 本次修复重点：
 - MCP/工具调用：OpenAI `tools`/`tool_choice` 自动映射到 Gemini `tools.functionDeclarations` 与 `toolConfig.functionCallingConfig`；模型返回的函数调用会按 OpenAI 规范回传 `tool_calls`（流式为 `delta.tool_calls`，非流式为 `message.tool_calls`）。
