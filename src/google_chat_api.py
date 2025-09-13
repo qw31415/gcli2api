@@ -20,7 +20,9 @@ from config import (
     get_auto_ban_error_codes,
     get_retry_429_max_retries,
     get_retry_429_enabled,
-    get_retry_429_interval
+    get_retry_429_interval,
+    get_vertex_enabled,
+    get_vertex_location
 )
 from .httpx_client import http_client, create_streaming_client_with_kwargs
 from log import log
@@ -87,6 +89,133 @@ async def _prepare_request_headers_and_payload(payload: dict, credential_data: d
     
     return headers, final_payload
 
+def _wants_image_output(payload: dict) -> bool:
+    """Detect if the request asks for image output (IMAGE/multi-modal)."""
+    try:
+        req = payload.get("request", {}) if isinstance(payload, dict) else {}
+        gen = req.get("generationConfig", {}) if isinstance(req, dict) else {}
+        modalities = gen.get("responseModalities")
+        if isinstance(modalities, list) and any(str(m).upper() == "IMAGE" for m in modalities):
+            return True
+        model = str(payload.get("model", ""))
+        # Heuristic: model name hints for image-preview family
+        if "image-preview" in model or "flash-image" in model:
+            return True
+    except Exception:
+        pass
+    return False
+
+async def _send_via_vertex(payload: dict, is_streaming: bool, credential_manager: CredentialManager) -> Response:
+    """Send request to Vertex AI generative endpoint using existing Bearer credentials.
+
+    Uses publishers/google/models/{model}:{action} with JSON body = request.
+    Falls back to pseudo-stream for streaming cases.
+    """
+    if not credential_manager:
+        return _create_error_response("Credential manager not provided", 500)
+
+    try:
+        credential_result = await credential_manager.get_valid_credential()
+        if not credential_result:
+            return _create_error_response("No valid credentials available", 500)
+        current_file, credential_data = credential_result
+        token = credential_data.get('token') or credential_data.get('access_token', '')
+        project_id = credential_data.get('project_id', '')
+        if not token:
+            return _create_error_response("Missing access token in credential", 500)
+        if not project_id:
+            return _create_error_response("Missing project_id in credential", 500)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": get_user_agent(),
+            # For some auth paths, this header is required for quota attribution
+            "x-goog-user-project": project_id,
+        }
+
+        model = payload.get("model", "")
+        location = await get_vertex_location()
+        action = "streamGenerateContent" if is_streaming else "generateContent"
+        target_url = (
+            f"https://{location}-aiplatform.googleapis.com/v1/"
+            f"projects/{project_id}/locations/{location}/publishers/google/models/{model}:{action}"
+        )
+        log.debug(f"Vertex target URL: {target_url}")
+
+        request_obj = payload.get("request", {})
+        post_data = json.dumps(request_obj)
+
+        if is_streaming:
+            # Use non-streaming and convert to pseudo-SSE to keep clients happy
+            async with http_client.get_client(timeout=None) as client:
+                resp = await client.post(target_url.replace(":streamGenerateContent", ":generateContent"), content=post_data, headers=headers)
+                if resp.status_code == 200:
+                    raw = await resp.aread()
+                    try:
+                        obj = json.loads(raw.decode('utf-8', errors='ignore'))
+                    except Exception:
+                        obj = {}
+
+                    async def pseudo_stream():
+                        yield f"data: {json.dumps(obj, separators=(',',':'))}\n\n"
+                        yield "data: [DONE]\n\n"
+
+                    # record success
+                    if current_file and credential_manager:
+                        await credential_manager.record_api_call_result(current_file, True)
+                        try:
+                            await record_successful_call(current_file, model)
+                        except Exception:
+                            pass
+                    return StreamingResponse(pseudo_stream(), media_type="text/event-stream", status_code=200)
+                else:
+                    content_bytes = await resp.aread()
+                    detail = content_bytes.decode('utf-8', errors='ignore') if isinstance(content_bytes, bytes) else ""
+                    if credential_manager and current_file:
+                        await credential_manager.record_api_call_result(current_file, False, resp.status_code)
+                    await _handle_api_error(credential_manager, resp.status_code, detail)
+                    return _create_error_response(f"Vertex API error: {resp.status_code}", resp.status_code)
+
+        # Non-streaming
+        async with http_client.get_client(timeout=None) as client:
+            resp = await client.post(target_url, content=post_data, headers=headers)
+            if resp.status_code == 200:
+                try:
+                    raw = await resp.aread()
+                    standard = json.loads(raw.decode('utf-8', errors='ignore'))
+                    # image rewrite for Markdown embedding
+                    try:
+                        standard = await _rewrite_response_images(standard)
+                    except Exception:
+                        pass
+                    # record success
+                    if current_file and credential_manager:
+                        await credential_manager.record_api_call_result(current_file, True)
+                        try:
+                            await record_successful_call(current_file, model)
+                        except Exception:
+                            pass
+                    return Response(
+                        content=json.dumps(standard, ensure_ascii=False),
+                        status_code=200,
+                        media_type="application/json; charset=utf-8"
+                    )
+                except Exception as e:
+                    log.error(f"Vertex parse error: {e}")
+                    return Response(content=await resp.aread(), status_code=200, media_type=resp.headers.get("Content-Type"))
+            else:
+                content_bytes = await resp.aread()
+                detail = content_bytes.decode('utf-8', errors='ignore') if isinstance(content_bytes, bytes) else ""
+                log.error(f"Vertex API returned status {resp.status_code}. Details: {detail[:500]}")
+                if credential_manager and current_file:
+                    await credential_manager.record_api_call_result(current_file, False, resp.status_code)
+                await _handle_api_error(credential_manager, resp.status_code, detail)
+                return _create_error_response(f"Vertex API error: {resp.status_code}", resp.status_code)
+    except Exception as e:
+        log.error(f"Vertex call failed: {e}")
+        return _create_error_response("Vertex call failed", 500)
+
 async def _rewrite_response_images(resp_obj: dict) -> dict:
     """Rewrite Gemini response/candidate parts to include image-bed Markdown links.
     Mutates a shallow copy and returns it; on error, returns original object.
@@ -135,7 +264,14 @@ async def send_gemini_request(payload: dict, is_streaming: bool = False, credent
     retry_429_enabled = await get_retry_429_enabled()
     retry_interval = await get_retry_429_interval()
     
-    # 确定API端点
+    # 若需要图片输出且允许 Vertex，则走 Vertex AI 上游
+    try:
+        if _wants_image_output(payload) and await get_vertex_enabled():
+            return await _send_via_vertex(payload, is_streaming, credential_manager)
+    except Exception as e:
+        log.debug(f"Vertex routing check failed: {e}")
+
+    # 确定API端点（Code Assist）
     action = "streamGenerateContent" if is_streaming else "generateContent"
     target_url = f"{await get_code_assist_endpoint()}/v1internal:{action}"
     if is_streaming:
@@ -505,10 +641,16 @@ async def _handle_non_streaming_response(resp, credential_manager: CredentialMan
             google_api_response = raw.decode('utf-8')
             if google_api_response.startswith('data: '):
                 google_api_response = google_api_response[len('data: '):]
-            google_api_response = json.loads(google_api_response)
-            log.debug(f"Google API原始响应: {json.dumps(google_api_response, ensure_ascii=False)[:500]}...")
-            standard_gemini_response = google_api_response.get("response")
-            log.debug(f"提取的response字段: {json.dumps(standard_gemini_response, ensure_ascii=False)[:500]}...")
+            obj = json.loads(google_api_response)
+            log.debug(f"Google API原始响应: {json.dumps(obj, ensure_ascii=False)[:500]}...")
+            # 兼容两种格式：
+            # - Code Assist: { response: {candidates: ...} }
+            # - Vertex/GL  : { candidates: ... }
+            if isinstance(obj, dict) and "response" in obj:
+                standard_gemini_response = obj.get("response")
+            else:
+                standard_gemini_response = obj
+            log.debug(f"标准Gemini响应: {json.dumps(standard_gemini_response, ensure_ascii=False)[:500]}...")
             # Ensure image parts are rewritten for clients expecting Markdown
             try:
                 _rewritten = await _rewrite_response_images(standard_gemini_response)

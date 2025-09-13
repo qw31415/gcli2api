@@ -276,6 +276,30 @@ async def get_anti_truncation_max_attempts() -> int:
     
     return int(await get_config_value("anti_truncation_max_attempts", 3))
 
+# Vertex AI configuration
+async def get_vertex_enabled() -> bool:
+    """
+    Whether Vertex AI upstream is enabled for image-generation requests.
+
+    Environment variable: VERTEX_ENABLED
+    TOML config key: vertex_enabled
+    Default: True (auto-enable so image requests can work out of the box)
+    """
+    env_value = os.getenv("VERTEX_ENABLED")
+    if env_value:
+        return env_value.lower() in ("true", "1", "yes", "on")
+    return bool(await get_config_value("vertex_enabled", True))
+
+async def get_vertex_location() -> str:
+    """
+    Vertex AI region for requests.
+
+    Environment variable: VERTEX_LOCATION
+    TOML config key: vertex_location
+    Default: us-central1
+    """
+    return str(await get_config_value("vertex_location", "us-central1", "VERTEX_LOCATION"))
+
 # Server Configuration
 async def get_server_host() -> str:
     """
