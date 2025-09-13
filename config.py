@@ -25,6 +25,27 @@ def get_base_model_name(model_name):
     - Strips feature suffixes (maxthinking/nothinking/search)
     - Normalizes common date/version tails like -preview-06-05 or -06-05 to the family base
     """
+    # Quick alias normalization for common client variants
+    try:
+        key = str(model_name).strip()
+        low = key.lower()
+        alias_map = {
+            # flash image preview variants used by some clients
+            "2.5-flash-image-preview": "gemini-2.5-flash",
+            "gemini-2.5-flash-image-preview": "gemini-2.5-flash",
+            "2.5-flash-image": "gemini-2.5-flash",
+            "gemini-2.5-flash-image": "gemini-2.5-flash",
+            # shorthand family names
+            "2.5-pro": "gemini-2.5-pro",
+            "gemini-2.5-pro-preview": "gemini-2.5-pro",
+            "gemini-2.5-pro-exp": "gemini-2.5-pro",
+        }
+        if low in alias_map:
+            return alias_map[low]
+    except Exception:
+        # Fall through to existing normalization
+        pass
+
     # Remove feature suffixes
     suffixes = ["-maxthinking", "-nothinking", "-search"]
     for suffix in suffixes:

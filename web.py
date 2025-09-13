@@ -156,6 +156,15 @@ def get_credential_manager():
 # 导出给其他模块使用
 __all__ = ['app', 'get_credential_manager']
 
+# 根路径健康检查（GET/HEAD），用于兼容平台探活（如 Cloudflare/Render 等）
+@app.get("/")
+async def root_ok() -> Response:
+    return Response(content="ok", media_type="text/plain", status_code=200)
+
+@app.head("/")
+async def root_head() -> Response:
+    return Response(status_code=200)
+
 async def main():
     """异步主启动函数"""
     from hypercorn.asyncio import serve

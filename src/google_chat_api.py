@@ -140,6 +140,11 @@ async def send_gemini_request(payload: dict, is_streaming: bool = False, credent
     target_url = f"{await get_code_assist_endpoint()}/v1internal:{action}"
     if is_streaming:
         target_url += "?alt=sse"
+    # Debug target endpoint
+    try:
+        log.debug(f"Gemini target URL: {target_url}")
+    except Exception:
+        pass
 
     # 确保有credential_manager
     if not credential_manager:
