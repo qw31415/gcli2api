@@ -14,8 +14,10 @@ from __future__ import annotations
 import os
 import re
 from typing import Optional, Tuple, List, Dict, Any
+import base64
+import mimetypes
 
-from .httpx_client import safe_post_async
+from .httpx_client import safe_post_async, safe_get_async
 from log import log
 
 
@@ -74,6 +76,36 @@ async def upload_data_uri_to_picgo(data_uri: str) -> Optional[str]:
         log.error(f"PicGo upload failed: {e}")
         return None
 
+async def upload_remote_image_to_picgo(image_url: str) -> Optional[str]:
+    """Download remote image and upload to PicGo/Chevereto; return hosted URL.
+
+    Best effort: returns None on any error or if image bed disabled.
+    """
+    enabled = os.getenv("PICGO_UPLOAD_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return None
+
+    api_key = os.getenv("PICGO_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        resp = await safe_get_async(image_url, timeout=30.0)
+        if resp.status_code != 200:
+            return None
+        content_type = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            # Try extension guess
+            guess = mimetypes.guess_type(image_url)[0]
+            mime = guess or "image/png"
+        else:
+            mime = content_type.split(";")[0].strip()
+        b64 = base64.b64encode(resp.content).decode("ascii")
+        return await upload_data_uri_to_picgo(f"data:{mime};base64,{b64}")
+    except Exception as e:
+        log.debug(f"upload_remote_image_to_picgo failed: {e}")
+        return None
+
 
 async def transform_gemini_parts_images(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Rewrite Gemini response parts to include image-bed Markdown links.
@@ -122,9 +154,18 @@ async def transform_gemini_parts_images(parts: List[Dict[str, Any]]) -> List[Dic
                 if file_d and isinstance(file_d, dict):
                     uri = file_d.get("fileUri") or file_d.get("file_uri")
                     if uri:
-                        # Keep original, and append a Markdown mirror for visibility
-                        new_parts.append(part)
-                        new_parts.append({"text": f"![image]({uri})"})
+                        # Try to rehost remote URI to image bed if enabled
+                        hosted = None
+                        try:
+                            hosted = await upload_remote_image_to_picgo(uri)
+                        except Exception as e:
+                            log.debug(f"remote image rehost failed: {e}")
+                        if hosted:
+                            new_parts.append({"text": f"![image]({hosted})"})
+                        else:
+                            # Fallback to original uri
+                            new_parts.append(part)
+                            new_parts.append({"text": f"![image]({uri})"})
                         continue
 
                 # Default: keep original

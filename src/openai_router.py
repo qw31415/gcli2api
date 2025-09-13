@@ -20,7 +20,7 @@ from .google_chat_api import send_gemini_request
 from .models import ChatCompletionRequest, ModelList, Model
 from .task_manager import create_managed_task
 from .openai_transfer import openai_request_to_gemini_payload, gemini_response_to_openai, gemini_stream_chunk_to_openai
-from .image_uploader import upload_data_uri_to_picgo
+from .image_uploader import upload_data_uri_to_picgo, upload_remote_image_to_picgo
 import re
 
 # 创建路由器
@@ -209,6 +209,7 @@ async def chat_completions(
         except Exception:
             pass
         # 可选：将内联data URI图片上传到图床并替换为外链
+        # 同时重托管远程图片链接为图床URL（最佳努力）
         try:
             pattern = re.compile(r"!\[image\]\((data:[^)]+)\)")
             for ch in openai_response.get("choices", []):
@@ -221,6 +222,20 @@ async def chat_completions(
                             content = content.replace(m.group(0), f"![image]({url})")
                     msg["content"] = content
         except Exception as _:
+            pass
+        # Rehost remote Markdown image links to image bed (best-effort)
+        try:
+            pattern_http = re.compile(r"!\[image\]\(((?:https?|http)://[^)]+)\)")
+            for ch in openai_response.get("choices", []):
+                msg = ch.get("message", {})
+                content = msg.get("content")
+                if isinstance(content, str):
+                    for m in pattern_http.finditer(content):
+                        hosted = await upload_remote_image_to_picgo(m.group(1))
+                        if hosted:
+                            content = content.replace(m.group(0), f"![image]({hosted})")
+                    msg["content"] = content
+        except Exception:
             pass
         log.debug(f"Converted OpenAI response keys: {list(openai_response.keys()) if isinstance(openai_response, dict) else 'Not a dict'}")
         return JSONResponse(content=openai_response)
@@ -458,6 +473,12 @@ async def convert_streaming_response(gemini_response, model: str) -> StreamingRe
                                         url = await upload_data_uri_to_picgo(m.group(1))
                                         if url:
                                             content = content.replace(m.group(0), f"![image]({url})")
+                                    # Remote images: try to rehost
+                                    pattern_http = re.compile(r"!\[image\]\(((?:https?|http)://[^)]+)\)")
+                                    for m in pattern_http.finditer(content):
+                                        hosted = await upload_remote_image_to_picgo(m.group(1))
+                                        if hosted:
+                                            content = content.replace(m.group(0), f"![image]({hosted})")
                                     delta["content"] = content
                         except Exception:
                             pass
