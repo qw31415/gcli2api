@@ -1394,31 +1394,46 @@
                 <div
                     style="margin-bottom: 30px; padding: 20px; border: 2px solid #e1e4e8; border-radius: 8px; background: #f8f9fa;">
                     <h4 style="margin-top: 0; color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 10px;">
-                        📤 GCLI 凭证批量上传</h4>
+                        📤 GCLI 凭证上传</h4>
 
-                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
-                        <p>点击选择文件或拖拽文件到此区域</p>
-                        <p style="color: #666; font-size: 14px;">支持 .json 和 .zip 格式文件</p>
-                        <p style="color: #888; font-size: 12px;">ZIP文件会自动解压提取其中的JSON凭证</p>
-                    </div>
+                    <!-- 文件上传 -->
+                    <div style="margin-bottom: 20px;">
+                        <h5 style="margin: 0 0 10px 0;">文件上传</h5>
+                        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                            <p>点击选择文件或拖拽文件到此区域</p>
+                            <p style="color: #666; font-size: 14px;">支持 .json 和 .zip 格式文件</p>
+                        </div>
 
-                    <input type="file" id="fileInput" multiple accept=".json,.zip" style="display: none;"
-                        onchange="handleFileSelect(event)" />
+                        <input type="file" id="fileInput" multiple accept=".json,.zip" style="display: none;"
+                            onchange="handleFileSelect(event)" />
 
-                    <div id="fileListSection" class="hidden">
-                        <h4>选择的文件：</h4>
-                        <div class="file-list" id="fileList"></div>
-                        <button class="btn" onclick="uploadFiles()">上传文件</button>
-                        <button class="btn" style="background-color: #6c757d;" onclick="clearFiles()">清空列表</button>
-                    </div>
+                        <div id="fileListSection" class="hidden">
+                            <h4>选择的文件：</h4>
+                            <div class="file-list" id="fileList"></div>
+                            <button class="btn" onclick="uploadFiles()">上传文件</button>
+                            <button class="btn" style="background-color: #6c757d;" onclick="clearFiles()">清空列表</button>
+                        </div>
 
-                    <div id="uploadProgressSection" class="hidden">
-                        <div class="upload-progress">
-                            <h4>上传进度：</h4>
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        <div id="uploadProgressSection" class="hidden">
+                            <div class="upload-progress">
+                                <h4>上传进度：</h4>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                                </div>
+                                <p id="progressText">0%</p>
                             </div>
-                            <p id="progressText">0%</p>
+                        </div>
+                    </div>
+
+                    <!-- 文本粘贴导入 -->
+                    <div style="border-top: 1px solid #ddd; padding-top: 15px;">
+                        <h5 style="margin: 0 0 10px 0;">📋 粘贴导入</h5>
+                        <textarea id="gcliTextImport" rows="6"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 12px;"
+                            placeholder='粘贴 JSON 凭证，支持单个对象 {"refresh_token":...} 或数组 [{...}, {...}]'></textarea>
+                        <div style="margin-top: 10px;">
+                            <button class="btn" onclick="importGcliText()">导入</button>
+                            <button class="btn" style="background-color: #6c757d;" onclick="document.getElementById('gcliTextImport').value=''">清空</button>
                         </div>
                     </div>
                 </div>
@@ -1426,37 +1441,52 @@
                 <!-- Antigravity凭证上传区域 -->
                 <div style="padding: 20px; border: 2px solid #e1e4e8; border-radius: 8px; background: #f8f9fa;">
                     <h4 style="margin-top: 0; color: #28a745; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
-                        📤 Antigravity 凭证批量上传</h4>
+                        📤 Antigravity 凭证上传</h4>
 
-                    <div class="upload-area" style="border-color: #28a745;"
-                        onclick="document.getElementById('antigravityFileInput').click()"
-                        ondragover="event.preventDefault(); this.style.borderColor='#28a745'; this.style.backgroundColor='#e7f9e7';"
-                        ondragleave="this.style.borderColor='#ddd'; this.style.backgroundColor='#fafafa';"
-                        ondrop="handleAntigravityFileDrop(event)">
-                        <p>点击选择文件或拖拽文件到此区域</p>
-                        <p style="color: #666; font-size: 14px;">支持 .json 和 .zip 格式文件</p>
-                        <p style="color: #888; font-size: 12px;">ZIP文件会自动解压提取其中的JSON凭证</p>
-                    </div>
+                    <!-- 文件上传 -->
+                    <div style="margin-bottom: 20px;">
+                        <h5 style="margin: 0 0 10px 0;">文件上传</h5>
+                        <div class="upload-area" style="border-color: #28a745;"
+                            onclick="document.getElementById('antigravityFileInput').click()"
+                            ondragover="event.preventDefault(); this.style.borderColor='#28a745'; this.style.backgroundColor='#e7f9e7';"
+                            ondragleave="this.style.borderColor='#ddd'; this.style.backgroundColor='#fafafa';"
+                            ondrop="handleAntigravityFileDrop(event)">
+                            <p>点击选择文件或拖拽文件到此区域</p>
+                            <p style="color: #666; font-size: 14px;">支持 .json 和 .zip 格式文件</p>
+                        </div>
 
-                    <input type="file" id="antigravityFileInput" multiple accept=".json,.zip" style="display: none;"
-                        onchange="handleAntigravityFileSelect(event)" />
+                        <input type="file" id="antigravityFileInput" multiple accept=".json,.zip" style="display: none;"
+                            onchange="handleAntigravityFileSelect(event)" />
 
-                    <div id="antigravityFileListSection" class="hidden">
-                        <h4>选择的文件：</h4>
-                        <div class="file-list" id="antigravityFileList"></div>
-                        <button class="btn" style="background-color: #28a745;"
-                            onclick="uploadAntigravityFiles()">上传文件</button>
-                        <button class="btn" style="background-color: #6c757d;"
-                            onclick="clearAntigravityFiles()">清空列表</button>
-                    </div>
+                        <div id="antigravityFileListSection" class="hidden">
+                            <h4>选择的文件：</h4>
+                            <div class="file-list" id="antigravityFileList"></div>
+                            <button class="btn" style="background-color: #28a745;"
+                                onclick="uploadAntigravityFiles()">上传文件</button>
+                            <button class="btn" style="background-color: #6c757d;"
+                                onclick="clearAntigravityFiles()">清空列表</button>
+                        </div>
 
-                    <div id="antigravityUploadProgressSection" class="hidden">
-                        <div class="upload-progress">
-                            <h4>上传进度：</h4>
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="antigravityProgressFill" style="width: 0%"></div>
+                        <div id="antigravityUploadProgressSection" class="hidden">
+                            <div class="upload-progress">
+                                <h4>上传进度：</h4>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="antigravityProgressFill" style="width: 0%"></div>
+                                </div>
+                                <p id="antigravityProgressText">0%</p>
                             </div>
-                            <p id="antigravityProgressText">0%</p>
+                        </div>
+                    </div>
+
+                    <!-- 文本粘贴导入 -->
+                    <div style="border-top: 1px solid #ddd; padding-top: 15px;">
+                        <h5 style="margin: 0 0 10px 0;">📋 粘贴导入</h5>
+                        <textarea id="agTextImport" rows="6"
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 12px;"
+                            placeholder='粘贴 JSON 凭证，支持单个对象 {"refresh_token":...} 或数组 [{...}, {...}]'></textarea>
+                        <div style="margin-top: 10px;">
+                            <button class="btn" style="background-color: #28a745;" onclick="importAgText()">导入</button>
+                            <button class="btn" style="background-color: #6c757d;" onclick="document.getElementById('agTextImport').value=''">清空</button>
                         </div>
                     </div>
                 </div>
@@ -1804,19 +1834,38 @@
                         </div>
 
                         <div class="config-group">
-                            <h4>自动封禁配置</h4>
+                            <h4>自动封禁配置 - GCLI</h4>
 
                             <div class="form-group">
                                 <label>
                                     <input type="checkbox" id="autoBanEnabled" class="config-checkbox" />
-                                    启用自动封禁
+                                    启用 GCLI 自动封禁
                                 </label>
-                                <small class="config-note">遇到指定错误码时自动禁用凭证</small>
+                                <small class="config-note">GCLI 凭证遇到指定错误码时自动禁用</small>
                             </div>
 
                             <div class="form-group">
-                                <label for="autoBanErrorCodes">自动封禁错误码:</label>
+                                <label for="autoBanErrorCodes">GCLI 自动封禁错误码:</label>
                                 <input type="text" id="autoBanErrorCodes" class="config-input"
+                                    placeholder="例如: 400,403" />
+                                <small class="config-note">用逗号分隔的错误码列表</small>
+                            </div>
+                        </div>
+
+                        <div class="config-group">
+                            <h4>自动封禁配置 - Antigravity</h4>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="agAutoBanEnabled" class="config-checkbox" />
+                                    启用 Antigravity 自动封禁
+                                </label>
+                                <small class="config-note">Antigravity 凭证遇到指定错误码时自动禁用</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="agAutoBanErrorCodes">Antigravity 自动封禁错误码:</label>
+                                <input type="text" id="agAutoBanErrorCodes" class="config-input"
                                     placeholder="例如: 400,403" />
                                 <small class="config-note">用逗号分隔的错误码列表</small>
                             </div>

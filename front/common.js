@@ -2147,6 +2147,10 @@ function populateConfigForm() {
 
     document.getElementById('autoBanEnabled').checked = Boolean(c.auto_ban_enabled);
     setConfigField('autoBanErrorCodes', (c.auto_ban_error_codes || []).join(','));
+
+    document.getElementById('agAutoBanEnabled').checked = Boolean(c.ag_auto_ban_enabled);
+    setConfigField('agAutoBanErrorCodes', (c.ag_auto_ban_error_codes || []).join(','));
+
     setConfigField('callsPerRotation', c.calls_per_rotation || 10);
 
     document.getElementById('retry429Enabled').checked = Boolean(c.retry_429_enabled);
@@ -2198,6 +2202,9 @@ async function saveConfig() {
             auto_ban_enabled: getChecked('autoBanEnabled'),
             auto_ban_error_codes: getValue('autoBanErrorCodes').split(',')
                 .map(c => parseInt(c.trim())).filter(c => !isNaN(c)),
+            ag_auto_ban_enabled: getChecked('agAutoBanEnabled'),
+            ag_auto_ban_error_codes: getValue('agAutoBanErrorCodes').split(',')
+                .map(c => parseInt(c.trim())).filter(c => !isNaN(c)),
             calls_per_rotation: getInt('callsPerRotation', 10),
             retry_429_enabled: getChecked('retry429Enabled'),
             retry_429_max_retries: getInt('retry429MaxRetries', 20),
@@ -2240,12 +2247,12 @@ async function saveConfig() {
 
 // 镜像网址配置
 const mirrorUrls = {
-    codeAssistEndpoint: 'https://gcli-api.sukaka.top/cloudcode-pa',
-    oauthProxyUrl: 'https://gcli-api.sukaka.top/oauth2',
-    googleapisProxyUrl: 'https://gcli-api.sukaka.top/googleapis',
-    resourceManagerApiUrl: 'https://gcli-api.sukaka.top/cloudresourcemanager',
-    serviceUsageApiUrl: 'https://gcli-api.sukaka.top/serviceusage',
-    antigravityApiUrl: 'https://gcli-api.sukaka.top/daily-cloudcode-pa'
+    codeAssistEndpoint: '',
+    oauthProxyUrl: '',
+    googleapisProxyUrl: '',
+    resourceManagerApiUrl: '',
+    serviceUsageApiUrl: '',
+    antigravityApiUrl: ''
 };
 
 const officialUrls = {
@@ -2514,3 +2521,59 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 });
+
+// =====================================================================
+// 文本导入功能
+// =====================================================================
+async function importGcliText() {
+    const text = document.getElementById('gcliTextImport')?.value.trim();
+    if (!text) {
+        showStatus('请输入要导入的 JSON 内容', 'error');
+        return;
+    }
+    await importTextCredentials(text, false);
+}
+
+async function importAgText() {
+    const text = document.getElementById('agTextImport')?.value.trim();
+    if (!text) {
+        showStatus('请输入要导入的 JSON 内容', 'error');
+        return;
+    }
+    await importTextCredentials(text, true);
+}
+
+async function importTextCredentials(content, isAntigravity) {
+    try {
+        const response = await fetch('./creds/import-text', {
+            method: 'POST',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content: content,
+                is_antigravity: isAntigravity
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showStatus(`✅ ${data.message}`, 'success');
+            // 清空输入框
+            const inputId = isAntigravity ? 'agTextImport' : 'gcliTextImport';
+            document.getElementById(inputId).value = '';
+            // 刷新凭证列表
+            if (isAntigravity) {
+                if (typeof loadAntigravityCredentials === 'function') loadAntigravityCredentials();
+            } else {
+                if (typeof loadCredentials === 'function') loadCredentials();
+            }
+        } else {
+            showStatus(`❌ 导入失败: ${data.detail || data.message}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`❌ 导入错误: ${error.message}`, 'error');
+    }
+}

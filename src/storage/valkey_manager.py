@@ -121,7 +121,7 @@ class ValkeyManager:
     async def store_credential(
         self, filename: str, creds_data: Dict[str, Any], is_antigravity: bool = False
     ) -> bool:
-        """存储单个凭证（自动按 refresh_token 去重）"""
+        """存储单个凭证"""
         if not self._initialized:
             await self.initialize()
 
@@ -129,25 +129,6 @@ class ValkeyManager:
             index_key = self.KEY_AG_INDEX if is_antigravity else self.KEY_CREDS_INDEX
             prefix = self.KEY_ANTIGRAVITY if is_antigravity else self.KEY_CREDENTIALS
             key = f"{prefix}{filename}"
-            refresh_token = creds_data.get("refresh_token", "")
-
-            # 按 refresh_token 去重
-            if refresh_token:
-                existing_files = list(await self._client.smembers(index_key))
-                for existing_file in existing_files:
-                    if existing_file == filename:
-                        continue
-                    existing_data = await self._client.hgetall(f"{prefix}{existing_file}")
-                    if existing_data:
-                        existing_token = existing_data.get("refresh_token", "")
-                        if existing_token:
-                            try:
-                                existing_token = json.loads(existing_token)
-                            except (json.JSONDecodeError, TypeError):
-                                pass
-                        if existing_token == refresh_token:
-                            log.debug(f"Skipped duplicate: {filename} (same token as {existing_file})")
-                            return False
 
             # Serialize all types to JSON for consistent deserialization
             serialized = {}
