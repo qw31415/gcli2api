@@ -24,6 +24,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel
 from starlette.websockets import WebSocketState
 
 import config
