@@ -1195,9 +1195,18 @@ async def get_config(token: str = Depends(verify_panel_token)):
         # 服务器配置
         current_config["host"] = await config.get_server_host()
         current_config["port"] = await config.get_server_port()
-        current_config["api_password"] = await config.get_api_password()
-        current_config["panel_password"] = await config.get_panel_password()
-        current_config["password"] = await config.get_server_password()
+        # 密码字段脱敏：只返回是否已设置，不返回实际值
+        api_pwd = await config.get_api_password()
+        panel_pwd = await config.get_panel_password()
+        server_pwd = await config.get_server_password()
+        current_config["api_password"] = "********" if api_pwd and api_pwd != "pwd" else ""
+        current_config["panel_password"] = "********" if panel_pwd and panel_pwd != "pwd" else ""
+        current_config["password"] = "********" if server_pwd and server_pwd != "pwd" else ""
+        current_config["_password_set"] = {
+            "api_password": bool(api_pwd and api_pwd != "pwd"),
+            "panel_password": bool(panel_pwd and panel_pwd != "pwd"),
+            "password": bool(server_pwd and server_pwd != "pwd"),
+        }
 
         # 从存储系统读取配置
         storage_adapter = await get_storage_adapter()
@@ -1206,9 +1215,10 @@ async def get_config(token: str = Depends(verify_panel_token)):
         # 获取环境变量锁定的配置键
         env_locked_keys = get_env_locked_keys()
 
-        # 合并存储系统配置（不覆盖环境变量）
+        # 合并存储系统配置（不覆盖环境变量，过滤敏感字段）
+        sensitive_keys = {"api_password", "panel_password", "password"}
         for key, value in storage_config.items():
-            if key not in env_locked_keys:
+            if key not in env_locked_keys and key not in sensitive_keys:
                 current_config[key] = value
 
         return JSONResponse(content={"config": current_config, "env_locked": list(env_locked_keys)})
@@ -1226,7 +1236,6 @@ async def save_config(request: ConfigSaveRequest, token: str = Depends(verify_pa
         new_config = request.config
 
         log.debug(f"收到的配置数据: {list(new_config.keys())}")
-        log.debug(f"收到的password值: {new_config.get('password', 'NOT_FOUND')}")
 
         # 验证配置项
         if "retry_429_max_retries" in new_config:
@@ -1297,27 +1306,23 @@ async def save_config(request: ConfigSaveRequest, token: str = Depends(verify_pa
 
         # 直接使用存储适配器保存配置
         storage_adapter = await get_storage_adapter()
+        password_keys = {"api_password", "panel_password", "password"}
         for key, value in new_config.items():
             if key not in env_locked_keys:
+                # 跳过掩码或空密码值，避免覆盖或锁死
+                if key in password_keys and (value == "********" or value == ""):
+                    continue
                 await storage_adapter.set_config(key, value)
-                if key in ("password", "api_password", "panel_password"):
-                    log.debug(f"设置{key}字段为: {value}")
 
-        # 重新加载配置缓存（关键！）
+        # 重新加载配置缓存
         await config.reload_config()
 
-        # 验证保存后的结果
-        test_api_password = await config.get_api_password()
-        test_panel_password = await config.get_panel_password()
-        test_password = await config.get_server_password()
-        log.debug(f"保存后立即读取的API密码: {test_api_password}")
-        log.debug(f"保存后立即读取的面板密码: {test_panel_password}")
-        log.debug(f"保存后立即读取的通用密码: {test_password}")
-
-        # 构建响应消息
+        # 构建响应消息（过滤敏感字段）
+        safe_config = {k: v for k, v in new_config.items()
+                       if k not in env_locked_keys and k not in password_keys}
         response_data = {
             "message": "配置保存成功",
-            "saved_config": {k: v for k, v in new_config.items() if k not in env_locked_keys},
+            "saved_config": safe_config,
         }
 
         return JSONResponse(content=response_data)

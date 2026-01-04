@@ -1,4 +1,4 @@
-# 检测是否为管理员
+# 检测是否为管理�?
 $IsElevated = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).
     IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -11,7 +11,7 @@ if (Get-Command scoop -ErrorAction SilentlyContinue) {
         # 管理员：使用官方一行命令并传入 -RunAsAdmin
         Invoke-Expression "& {$(Invoke-RestMethod get.scoop.sh)} -RunAsAdmin"
     } else {
-        # 普通用户安装
+        # 普通用户安�?
         Invoke-WebRequest -useb get.scoop.sh | Invoke-Expression
     }
 }
@@ -24,7 +24,7 @@ elseif (Test-Path -LiteralPath "./gcli2api/web.py") {
     Set-Location ./gcli2api
 }
 else {
-    git clone https://github.com/su-kaka/gcli2api.git
+    git clone https://github.com/qw31415/gcli2api.git
     Set-Location ./gcli2api
 }
 # Create relocatable virtual environment to ensure portability

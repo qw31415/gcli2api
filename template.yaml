@@ -3,7 +3,7 @@ kind: Template
 metadata:
   name: gcli2api
 spec:
-  description: "将 GeminiCLI 转换为 OpenAI 和 GEMINI API 接口"
+  description: "�?GeminiCLI 转换�?OpenAI �?GEMINI API 接口"
   tags:
     - ai
     - api
@@ -21,9 +21,9 @@ spec:
   readme: |
     # GeminiCLI to API
 
-    将 GeminiCLI 转换为 OpenAI 和 GEMINI API 接口
+    �?GeminiCLI 转换�?OpenAI �?GEMINI API 接口
 
-    部署后请访问您的域名进行配置。
+    部署后请访问您的域名进行配置�?
   services:
     - name: gcli2api
       template: PREBUILT
@@ -31,7 +31,7 @@ spec:
         id: gcli2api
         name: gcli2api
         source:
-          image: ghcr.io/su-kaka/gcli2api:latest
+          image: ghcr.io/qw31415/gcli2api:latest
         ports:
           - id: web
             port: 7861

@@ -1,8 +1,10 @@
 """
-存储适配器，提供统一的接口来处理 SQLite 和 MongoDB 存储。
-根据配置自动选择存储后端：
-- 默认使用 SQLite（本地文件存储）
+存储适配器，提供统一的接口来处理多种存储后端。
+根据配置自动选择存储后端（优先级从高到低）：
+- 如果设置了 VALKEY_URL 或 REDIS_URL 环境变量，则使用 Valkey/Redis
+- 如果设置了 POSTGRES_DSN 环境变量，则使用 PostgreSQL
 - 如果设置了 MONGODB_URI 环境变量，则使用 MongoDB
+- 默认使用 SQLite（本地文件存储）
 """
 
 import asyncio
@@ -86,11 +88,53 @@ class StorageAdapter:
             if self._initialized:
                 return
 
-            # 按优先级检查存储后端：SQLite > MongoDB
+            # 按优先级检查存储后端：Valkey/Redis > PostgreSQL > MongoDB > SQLite
+            valkey_url = os.getenv("VALKEY_URL", "") or os.getenv("REDIS_URL", "")
+            postgres_dsn = os.getenv("POSTGRES_DSN", "")
             mongodb_uri = os.getenv("MONGODB_URI", "")
 
-            # 优先使用 SQLite（默认启用，无需环境变量）
-            if not mongodb_uri:
+            # 最高优先级：Valkey/Redis
+            if valkey_url:
+                try:
+                    from .storage.valkey_manager import ValkeyManager
+
+                    self._backend = ValkeyManager()
+                    await self._backend.initialize()
+                    log.info("Using Valkey/Redis storage backend")
+                    self._initialized = True
+                    return
+                except Exception as e:
+                    log.error(f"Failed to initialize Valkey/Redis backend: {e}")
+                    log.info("Falling back to other backends...")
+
+            # 其次使用 PostgreSQL
+            if postgres_dsn:
+                try:
+                    from .storage.postgres_manager import PostgresManager
+
+                    self._backend = PostgresManager()
+                    await self._backend.initialize()
+                    log.info("Using PostgreSQL storage backend")
+                except Exception as e:
+                    log.error(f"Failed to initialize PostgreSQL backend: {e}")
+                    log.info("Falling back to other backends...")
+                    postgres_dsn = ""  # 标记失败，尝试下一个
+
+            # 其次使用 MongoDB
+            if not postgres_dsn and mongodb_uri:
+                try:
+                    from .storage.mongodb_manager import MongoDBManager
+
+                    self._backend = MongoDBManager()
+                    await self._backend.initialize()
+                    log.info("Using MongoDB storage backend")
+                except Exception as e:
+                    log.error(f"Failed to initialize MongoDB backend: {e}")
+                    log.info("Falling back to SQLite storage backend")
+                    mongodb_uri = ""  # 标记失败，尝试下一个
+
+            # 最后使用 SQLite（默认）
+            if not postgres_dsn and not mongodb_uri:
                 try:
                     from .storage.sqlite_manager import SQLiteManager
 
@@ -100,27 +144,6 @@ class StorageAdapter:
                 except Exception as e:
                     log.error(f"Failed to initialize SQLite backend: {e}")
                     raise RuntimeError("No storage backend available") from e
-            else:
-                # 使用 MongoDB
-                try:
-                    from .storage.mongodb_manager import MongoDBManager
-
-                    self._backend = MongoDBManager()
-                    await self._backend.initialize()
-                    log.info("Using MongoDB storage backend")
-                except Exception as e:
-                    log.error(f"Failed to initialize MongoDB backend: {e}")
-                    # 尝试降级到 SQLite
-                    log.info("Falling back to SQLite storage backend")
-                    try:
-                        from .storage.sqlite_manager import SQLiteManager
-
-                        self._backend = SQLiteManager()
-                        await self._backend.initialize()
-                        log.info("Using SQLite storage backend (fallback)")
-                    except Exception as e2:
-                        log.error(f"Failed to initialize SQLite backend: {e2}")
-                        raise RuntimeError("No storage backend available") from e2
 
             self._initialized = True
 
@@ -249,7 +272,11 @@ class StorageAdapter:
 
         # 检查后端类型
         backend_class_name = self._backend.__class__.__name__
-        if "SQLite" in backend_class_name or "sqlite" in backend_class_name.lower():
+        if "Valkey" in backend_class_name or "valkey" in backend_class_name.lower():
+            return "valkey"
+        elif "Postgres" in backend_class_name or "postgres" in backend_class_name.lower():
+            return "postgresql"
+        elif "SQLite" in backend_class_name or "sqlite" in backend_class_name.lower():
             return "sqlite"
         elif "MongoDB" in backend_class_name or "mongo" in backend_class_name.lower():
             return "mongodb"

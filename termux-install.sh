@@ -1,20 +1,20 @@
 #!/bin/bash
 
-# 避免交互式提示
+# 避免交互式提�?
 export DEBIAN_FRONTEND=noninteractive
 
 if [ "$(whoami)" = "root" ]; then
-    echo "检测到root用户，正在退出..."
+    echo "检测到root用户，正在退�?.."
     exit
 fi
 
-echo "检查Termux镜像源配置..."
+echo "检查Termux镜像源配�?.."
 
 # 检查当前镜像源是否已经是Cloudflare镜像
 target_mirror="https://packages-cf.termux.dev/apt/termux-main"
 fallback_mirror="https://packages.termux.dev/apt/termux-main"
 if [ -f "$PREFIX/etc/apt/sources.list" ] && grep -q "$target_mirror" "$PREFIX/etc/apt/sources.list"; then
-    echo "✅ 镜像源已经配置为Cloudflare镜像，跳过修改"
+    echo "�?镜像源已经配置为Cloudflare镜像，跳过修�?
 else
     echo "正在设置Termux镜像为Cloudflare镜像..."
     
@@ -24,19 +24,19 @@ else
         cp "$PREFIX/etc/apt/sources.list" "$PREFIX/etc/apt/sources.list.backup.$(date +%s)"
     fi
     
-    # 写入新的镜像源
-    echo "写入新的镜像源配置..."
+    # 写入新的镜像�?
+    echo "写入新的镜像源配�?.."
     cat > "$PREFIX/etc/apt/sources.list" << 'EOF'
-# Cloudflare镜像源
+# Cloudflare镜像�?
 deb https://packages-cf.termux.dev/apt/termux-main stable main
 EOF
     
-    echo "✅ 镜像源已更新为: $target_mirror"
+    echo "�?镜像源已更新�? $target_mirror"
 fi
 
 ensure_dpkg_ready() {
-    echo "检查并修复 dpkg/apt 状态..."
-    # 等待可能存在的 apt/dpkg 进程结束
+    echo "检查并修复 dpkg/apt 状�?.."
+    # 等待可能存在�?apt/dpkg 进程结束
     if pgrep -f "apt|dpkg" >/dev/null 2>&1; then
         echo "检测到 apt/dpkg 正在运行，等待其结束..."
         while pgrep -f "apt|dpkg" >/dev/null 2>&1; do sleep 1; done
@@ -52,19 +52,19 @@ ensure_dpkg_ready() {
 }
 
 
-# 更新包列表并检查错误
-echo "正在更新包列表..."
+# 更新包列表并检查错�?
+echo "正在更新包列�?.."
 ensure_dpkg_ready
 apt_output=$(apt update 2>&1)
 if [ $? -ne 0 ]; then
     if echo "$apt_output" | grep -qi "is not signed"; then
         echo "⚠️ 检测到仓库未签名，尝试切换到官方镜像并修复 keyring..."
-        # 切换到官方镜像
+        # 切换到官方镜�?
         sed -i "s#${target_mirror}#${fallback_mirror}#g" "$PREFIX/etc/apt/sources.list" || true
         # 清理列表与锁
         rm -rf "$PREFIX/var/lib/apt/lists/"* || true
         rm -f "$PREFIX/var/lib/dpkg/lock" "$PREFIX/var/lib/apt/lists/lock" "$PREFIX/var/cache/apt/archives/lock" || true
-        # 重新安装 termux-keyring（若已安装则强制重装）
+        # 重新安装 termux-keyring（若已安装则强制重装�?
         apt-get install --reinstall -y termux-keyring || true
         # 再次更新
         ensure_dpkg_ready
@@ -78,34 +78,34 @@ else
     echo "$apt_output"
 fi
 
-echo "✅ Termux镜像设置完成！"
+echo "�?Termux镜像设置完成�?
 echo "📁 原始配置已备份到: $PREFIX/etc/apt/sources.list.backup.*"
-echo "🔄 如需恢复原始镜像，可以运行:"
+echo "🔄 如需恢复原始镜像，可以运�?"
 echo "   cp \$PREFIX/etc/apt/sources.list.backup.* \$PREFIX/etc/apt/sources.list && apt update"
 
 # 检查是否需要更新包管理器和安装软件
 need_update=false
 packages_to_install=""
 
-# 检查 uv 是否已安装
+# 检�?uv 是否已安�?
 if ! command -v uv &> /dev/null; then
     need_update=true
     packages_to_install="$packages_to_install uv"
 fi
 
-# 检查 python 是否已安装
+# 检�?python 是否已安�?
 if ! command -v python &> /dev/null; then
     need_update=true
     packages_to_install="$packages_to_install python"
 fi
 
-# 检查 nodejs 是否已安装
+# 检�?nodejs 是否已安�?
 if ! command -v node &> /dev/null; then
     need_update=true
     packages_to_install="$packages_to_install nodejs"
 fi
 
-# 检查 git 是否已安装
+# 检�?git 是否已安�?
 if ! command -v git &> /dev/null; then
     need_update=true
     packages_to_install="$packages_to_install git"
@@ -121,7 +121,7 @@ else
     echo "所需软件包已全部安装，跳过更新和安装步骤"
 fi
 
-# 检查 pm2 是否已安装
+# 检�?pm2 是否已安�?
 if ! command -v pm2 &> /dev/null; then
     echo "正在安装 pm2..."
     npm install pm2 -g
@@ -138,15 +138,15 @@ elif [ -f "./gcli2api/web.py" ]; then
     cd ./gcli2api
 else
     echo "克隆项目仓库..."
-    git clone https://github.com/su-kaka/gcli2api.git
+    git clone https://github.com/qw31415/gcli2api.git
     cd ./gcli2api
 fi
 
-echo "强制同步项目代码，忽略本地修改..."
+echo "强制同步项目代码，忽略本地修�?.."
 git fetch --all
 git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
 
-echo "初始化 uv 环境..."
+echo "初始�?uv 环境..."
 uv init
 
 echo "安装 Python 依赖..."
@@ -157,4 +157,4 @@ source .venv/bin/activate
 pm2 start .venv/bin/python --name web -- web.py
 cd ..
 
-echo "✅ 安装完成！服务已启动。"
+echo "�?安装完成！服务已启动�?
