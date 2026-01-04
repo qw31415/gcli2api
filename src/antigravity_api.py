@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config import (
     get_antigravity_api_url,
-    get_auto_ban_enabled,
-    get_auto_ban_error_codes,
+    get_ag_auto_ban_enabled,
+    get_ag_auto_ban_error_codes,
     get_return_thoughts_to_frontend,
     get_retry_429_enabled,
     get_retry_429_interval,
@@ -27,8 +27,8 @@ from .utils import ANTIGRAVITY_USER_AGENT, parse_quota_reset_timestamp
 async def _check_should_auto_ban(status_code: int) -> bool:
     """检查是否应该触发自动封禁"""
     return (
-        await get_auto_ban_enabled()
-        and status_code in await get_auto_ban_error_codes()
+        await get_ag_auto_ban_enabled()
+        and status_code in await get_ag_auto_ban_error_codes()
     )
 
 

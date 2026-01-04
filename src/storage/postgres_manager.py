@@ -224,14 +224,25 @@ class PostgresManager:
             return []
 
     async def store_credential(self, filename: str, credential_data: Dict[str, Any], is_antigravity: bool = False) -> bool:
-        """存储或更新凭证"""
+        """存储或更新凭证（自动按 refresh_token 去重）"""
         self._ensure_initialized()
 
         try:
             table = self._get_table_name(is_antigravity)
             current_ts = time.time()
+            refresh_token = credential_data.get("refresh_token", "")
 
             async with self._pool.acquire() as conn:
+                # 按 refresh_token 去重：检查是否已存在相同 token 的凭证
+                if refresh_token:
+                    dup = await conn.fetchrow(f"""
+                        SELECT id, filename FROM {table}
+                        WHERE credential_data->>'refresh_token' = $1
+                    """, refresh_token)
+                    if dup and dup["filename"] != filename:
+                        log.debug(f"Skipped duplicate: {filename} (same token as {dup['filename']})")
+                        return False
+
                 existing = await conn.fetchrow(f"SELECT id FROM {table} WHERE filename = $1", filename)
 
                 if existing:

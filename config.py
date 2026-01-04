@@ -89,30 +89,44 @@ async def get_proxy_config():
 
 
 async def get_auto_ban_enabled() -> bool:
-    """Get auto ban enabled setting."""
+    """Get GCLI auto ban enabled setting."""
     env_value = os.getenv("AUTO_BAN")
     if env_value:
         return env_value.lower() in ("true", "1", "yes", "on")
-
     return bool(await get_config_value("auto_ban_enabled", False))
 
 
 async def get_auto_ban_error_codes() -> list:
-    """
-    Get auto ban error codes.
-
-    Environment variable: AUTO_BAN_ERROR_CODES (comma-separated, e.g., "400,403")
-    Database config key: auto_ban_error_codes
-    Default: [400, 403]
-    """
+    """Get GCLI auto ban error codes."""
     env_value = os.getenv("AUTO_BAN_ERROR_CODES")
     if env_value:
         try:
             return [int(code.strip()) for code in env_value.split(",") if code.strip()]
         except ValueError:
             pass
-
     codes = await get_config_value("auto_ban_error_codes")
+    if codes and isinstance(codes, list):
+        return codes
+    return AUTO_BAN_ERROR_CODES
+
+
+async def get_ag_auto_ban_enabled() -> bool:
+    """Get Antigravity auto ban enabled setting."""
+    env_value = os.getenv("AG_AUTO_BAN")
+    if env_value:
+        return env_value.lower() in ("true", "1", "yes", "on")
+    return bool(await get_config_value("ag_auto_ban_enabled", False))
+
+
+async def get_ag_auto_ban_error_codes() -> list:
+    """Get Antigravity auto ban error codes."""
+    env_value = os.getenv("AG_AUTO_BAN_ERROR_CODES")
+    if env_value:
+        try:
+            return [int(code.strip()) for code in env_value.split(",") if code.strip()]
+        except ValueError:
+            pass
+    codes = await get_config_value("ag_auto_ban_error_codes")
     if codes and isinstance(codes, list):
         return codes
     return AUTO_BAN_ERROR_CODES

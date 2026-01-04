@@ -1076,6 +1076,125 @@ async def creds_batch_action(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class TextImportRequest(BaseModel):
+    """文本导入请求"""
+    content: str
+    is_antigravity: bool = False
+
+
+@router.post("/creds/import-text")
+async def import_credentials_from_text(
+    request: TextImportRequest, token: str = Depends(verify_panel_token)
+):
+    """从粘贴的文本导入凭证（支持单个JSON或JSON数组）"""
+    try:
+        content = request.content.strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="内容不能为空")
+
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="无效的 JSON 格式")
+
+        await ensure_credential_manager_initialized()
+
+        # 支持单个对象或数组
+        if isinstance(data, dict):
+            creds_list = [data]
+        elif isinstance(data, list):
+            creds_list = data
+        else:
+            raise HTTPException(status_code=400, detail="JSON 必须是对象或数组")
+
+        success_count = 0
+        skip_count = 0
+        errors = []
+
+        for idx, cred in enumerate(creds_list):
+            if not isinstance(cred, dict):
+                errors.append(f"第 {idx + 1} 项不是有效的凭证对象")
+                continue
+
+            # 生成文件名
+            project_id = cred.get("project_id", f"imported_{idx}")
+            filename = f"{project_id}.json"
+
+            result = await credential_manager.add_credential(
+                filename, cred, is_antigravity=request.is_antigravity
+            )
+            if result:
+                success_count += 1
+            else:
+                skip_count += 1
+
+        return JSONResponse(content={
+            "success": True,
+            "imported": success_count,
+            "skipped": skip_count,
+            "errors": errors,
+            "message": f"导入完成: 成功 {success_count}, 跳过 {skip_count} (重复)"
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"文本导入失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/creds/dedupe")
+async def dedupe_credentials(token: str = Depends(verify_panel_token)):
+    """去重凭证（按 refresh_token 去重，保留最新的）"""
+    try:
+        storage_adapter = await get_storage_adapter()
+
+        # 获取所有凭证
+        all_creds = await storage_adapter.get_all_credentials(is_antigravity=False)
+
+        seen_tokens = {}
+        duplicates = []
+
+        # 按 last_success 倒序排列，保留最新的
+        sorted_creds = sorted(
+            all_creds.items(),
+            key=lambda x: x[1].get("last_success", 0) or 0,
+            reverse=True
+        )
+
+        for filename, cred_data in sorted_creds:
+            refresh_token = cred_data.get("refresh_token", "")
+            if not refresh_token:
+                continue
+
+            if refresh_token in seen_tokens:
+                duplicates.append({
+                    "filename": filename,
+                    "duplicate_of": seen_tokens[refresh_token]
+                })
+            else:
+                seen_tokens[refresh_token] = filename
+
+        # 删除重复项
+        deleted = 0
+        for dup in duplicates:
+            success = await storage_adapter.delete_credential(dup["filename"])
+            if success:
+                deleted += 1
+
+        return JSONResponse(content={
+            "success": True,
+            "total_checked": len(all_creds),
+            "duplicates_found": len(duplicates),
+            "deleted": deleted,
+            "message": f"去重完成: 删除 {deleted} 个重复凭证"
+        })
+
+    except Exception as e:
+        log.error(f"凭证去重失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/creds/download/{filename}")
 async def download_cred_file(filename: str, token: str = Depends(verify_panel_token)):
     """下载单个凭证文件"""
@@ -1168,9 +1287,13 @@ async def get_config(token: str = Depends(verify_panel_token)):
         current_config["service_usage_api_url"] = await config.get_service_usage_api_url()
         current_config["antigravity_api_url"] = await config.get_antigravity_api_url()
 
-        # 自动封禁配置
+        # 自动封禁配置 (GCLI)
         current_config["auto_ban_enabled"] = await config.get_auto_ban_enabled()
         current_config["auto_ban_error_codes"] = await config.get_auto_ban_error_codes()
+
+        # 自动封禁配置 (Antigravity)
+        current_config["ag_auto_ban_enabled"] = await config.get_ag_auto_ban_enabled()
+        current_config["ag_auto_ban_error_codes"] = await config.get_ag_auto_ban_error_codes()
 
         # 429重试配置
         current_config["retry_429_max_retries"] = await config.get_retry_429_max_retries()
@@ -1661,6 +1784,55 @@ async def antigravity_batch_action(request: CredFileBatchActionRequest, token: s
         })
     except Exception as e:
         log.error(f"批量操作 antigravity 凭证失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/antigravity/creds/dedupe")
+async def dedupe_antigravity_credentials(token: str = Depends(verify_panel_token)):
+    """去重 Antigravity 凭证（按 refresh_token 去重，保留最新的）"""
+    try:
+        storage_adapter = await get_storage_adapter()
+
+        all_creds = await storage_adapter.get_all_credentials(is_antigravity=True)
+
+        seen_tokens = {}
+        duplicates = []
+
+        sorted_creds = sorted(
+            all_creds.items(),
+            key=lambda x: x[1].get("last_success", 0) or 0,
+            reverse=True
+        )
+
+        for filename, cred_data in sorted_creds:
+            refresh_token = cred_data.get("refresh_token", "")
+            if not refresh_token:
+                continue
+
+            if refresh_token in seen_tokens:
+                duplicates.append({
+                    "filename": filename,
+                    "duplicate_of": seen_tokens[refresh_token]
+                })
+            else:
+                seen_tokens[refresh_token] = filename
+
+        deleted = 0
+        for dup in duplicates:
+            success = await storage_adapter.delete_credential(dup["filename"], is_antigravity=True)
+            if success:
+                deleted += 1
+
+        return JSONResponse(content={
+            "success": True,
+            "total_checked": len(all_creds),
+            "duplicates_found": len(duplicates),
+            "deleted": deleted,
+            "message": f"去重完成: 删除 {deleted} 个重复凭证"
+        })
+
+    except Exception as e:
+        log.error(f"Antigravity 凭证去重失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
