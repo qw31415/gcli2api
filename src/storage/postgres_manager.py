@@ -13,6 +13,18 @@ import asyncpg
 from log import log
 
 
+def _parse_jsonb(value: Any, default: Any = None) -> Any:
+    """安全解析 JSONB 字段，处理字符串或已解析的值"""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return value
+
+
 class PostgresManager:
     """PostgreSQL 数据库管理器"""
 
@@ -178,7 +190,7 @@ class PostgresManager:
                         """)
 
                         for r in rows:
-                            cooldowns = r["model_cooldowns"] or {}
+                            cooldowns = _parse_jsonb(r["model_cooldowns"], {})
                             cooldown = cooldowns.get(model_key)
                             if cooldown is None or current_time >= cooldown:
                                 return r["filename"], r["credential_data"]
@@ -366,10 +378,10 @@ class PostgresManager:
                 if row:
                     return {
                         "disabled": row["disabled"] or False,
-                        "error_codes": row["error_codes"] or [],
+                        "error_codes": _parse_jsonb(row["error_codes"], []),
                         "last_success": row["last_success"] or time.time(),
                         "user_email": row["user_email"],
-                        "model_cooldowns": row["model_cooldowns"] or {},
+                        "model_cooldowns": _parse_jsonb(row["model_cooldowns"], {}),
                     }
 
                 return {
@@ -401,14 +413,14 @@ class PostgresManager:
 
                 for row in rows:
                     filename = row["filename"]
-                    model_cooldowns = row["model_cooldowns"] or {}
+                    model_cooldowns = _parse_jsonb(row["model_cooldowns"], {})
 
                     if model_cooldowns:
                         model_cooldowns = {k: v for k, v in model_cooldowns.items() if v > current_time}
 
                     states[filename] = {
                         "disabled": row["disabled"] or False,
-                        "error_codes": row["error_codes"] or [],
+                        "error_codes": _parse_jsonb(row["error_codes"], []),
                         "last_success": row["last_success"] or time.time(),
                         "user_email": row["user_email"],
                         "model_cooldowns": model_cooldowns,
@@ -464,7 +476,7 @@ class PostgresManager:
                 current_time = time.time()
 
                 for row in rows:
-                    error_codes = row["error_codes"] or []
+                    error_codes = _parse_jsonb(row["error_codes"], [])
 
                     if error_code_filter and str(error_code_filter).strip().lower() != "all":
                         filter_value = str(error_code_filter).strip()
@@ -481,7 +493,7 @@ class PostgresManager:
                         if not match:
                             continue
 
-                    model_cooldowns = row["model_cooldowns"] or {}
+                    model_cooldowns = _parse_jsonb(row["model_cooldowns"], {})
                     active_cooldowns = {k: v for k, v in model_cooldowns.items() if v > current_time} if model_cooldowns else {}
 
                     summary = {
@@ -597,7 +609,7 @@ class PostgresManager:
                     log.warning(f"Credential {filename} not found")
                     return False
 
-                model_cooldowns = row["model_cooldowns"] or {}
+                model_cooldowns = _parse_jsonb(row["model_cooldowns"], {})
 
                 if cooldown_until is None:
                     model_cooldowns.pop(model_key, None)
