@@ -6,9 +6,14 @@ Main Web Integration - Integrates all routers and modules
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.formparsers import MultiPartParser
+
+# 增加文件上传数量限制 (默认1000)
+MultiPartParser.max_file_size = 1024 * 1024 * 100  # 100MB per file
+MultiPartParser.max_files = 10000  # 最多 10000 个文件
 
 from config import get_server_host, get_server_port
 from log import log
