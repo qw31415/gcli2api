@@ -159,3 +159,23 @@ asyncio.run(migrate())
 
 ### Q: 如何查看当前使用的后端？
 访问 `/api/auth/storage-info` 或查看启动日志。
+
+### Q: PostgreSQL JSONB 字段报错？
+如遇 `'str' object has no attribute 'items'` 错误，已通过 `_parse_jsonb()`
+辅助函数修复，确保 JSONB 字段无论返回字符串还是已解析对象都能正确处理。
+
+---
+
+## 技术细节
+
+### PostgreSQL JSONB 处理
+
+所有 JSONB 字段（`model_cooldowns`、`error_codes`、`credential_data`）使用
+`_parse_jsonb()` 安全解析，兼容 asyncpg 不同版本的返回格式。
+
+### 凭证上传
+
+批量上传无文件数量限制，支持：
+- 单个 JSON 文件
+- 多个 JSON 文件
+- ZIP 压缩包（自动解压提取 JSON）

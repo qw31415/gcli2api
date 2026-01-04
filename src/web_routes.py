@@ -473,12 +473,6 @@ async def upload_credentials_common(
     if not files:
         raise HTTPException(status_code=400, detail="请选择要上传的文件")
 
-    # 检查文件数量限制
-    if len(files) > 100:
-        raise HTTPException(
-            status_code=400, detail=f"文件数量过多，最多支持100个文件，当前：{len(files)}个"
-        )
-
     files_data = []
     for file in files:
         # 检查文件类型：支持JSON和ZIP

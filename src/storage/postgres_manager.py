@@ -173,28 +173,20 @@ class PostgresManager:
 
             async with self._pool.acquire() as conn:
                 if model_key:
-                    row = await conn.fetchrow(f"""
+                    # 获取所有启用的凭证，随机排序后找第一个不在冷却中的
+                    rows = await conn.fetch(f"""
                         SELECT filename, credential_data, model_cooldowns
                         FROM {table}
                         WHERE disabled = FALSE
                         ORDER BY RANDOM()
-                        LIMIT 100
                     """)
 
-                    if row:
-                        rows = await conn.fetch(f"""
-                            SELECT filename, credential_data, model_cooldowns
-                            FROM {table}
-                            WHERE disabled = FALSE
-                            ORDER BY RANDOM()
-                        """)
-
-                        for r in rows:
-                            cooldowns = _parse_jsonb(r["model_cooldowns"], {})
-                            cooldown = cooldowns.get(model_key)
-                            if cooldown is None or current_time >= cooldown:
-                                return r["filename"], r["credential_data"]
-                        return None
+                    for r in rows:
+                        cooldowns = _parse_jsonb(r["model_cooldowns"], {})
+                        cooldown = cooldowns.get(model_key)
+                        if cooldown is None or current_time >= cooldown:
+                            return r["filename"], _parse_jsonb(r["credential_data"], {})
+                    return None
                 else:
                     row = await conn.fetchrow(f"""
                         SELECT filename, credential_data
@@ -205,7 +197,7 @@ class PostgresManager:
                     """)
 
                     if row:
-                        return row["filename"], row["credential_data"]
+                        return row["filename"], _parse_jsonb(row["credential_data"], {})
 
                 return None
 
@@ -271,11 +263,11 @@ class PostgresManager:
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(f"SELECT credential_data FROM {table} WHERE filename = $1", filename)
                 if row:
-                    return row["credential_data"]
+                    return _parse_jsonb(row["credential_data"], {})
 
                 row = await conn.fetchrow(f"SELECT credential_data FROM {table} WHERE filename LIKE '%' || $1", filename)
                 if row:
-                    return row["credential_data"]
+                    return _parse_jsonb(row["credential_data"], {})
 
                 return None
 
