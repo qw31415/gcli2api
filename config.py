@@ -84,10 +84,44 @@ async def get_config_value(key: str, default: Any = None, env_var: Optional[str]
 
 
 # Configuration getters - all async
-async def get_proxy_config():
+def sanitize_proxy_url(proxy: Any) -> Optional[str]:
+    """
+    Sanitize proxy URL value.
+
+    过滤无效的代理配置：
+    - 空字符串、空白字符串
+    - '""' 或 "''" 等带引号的空字符串
+    - 不包含 :// 的无效 URL
+    """
+    if proxy is None:
+        return None
+
+    value = str(proxy).strip()
+    if not value:
+        return None
+
+    # 过滤带引号的空字符串 "" 或 ''
+    if value in ('""', "''", '""', "''"):
+        return None
+
+    # 去除首尾引号
+    if (value.startswith('"') and value.endswith('"')) or \
+       (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1].strip()
+        if not value:
+            return None
+
+    # 代理 URL 必须包含协议
+    if "://" not in value:
+        return None
+
+    return value
+
+
+async def get_proxy_config() -> Optional[str]:
     """Get proxy configuration."""
     proxy_url = await get_config_value("proxy", env_var="PROXY")
-    return proxy_url if proxy_url else None
+    return sanitize_proxy_url(proxy_url)
 
 
 async def get_auto_ban_enabled() -> bool:
