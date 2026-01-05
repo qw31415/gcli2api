@@ -41,6 +41,35 @@ const AppState = {
 };
 
 // =====================================================================
+// 错误码解析工具
+// =====================================================================
+function parseErrorCodesToString(codes) {
+    // 将各种格式的错误码转为逗号分隔字符串显示
+    if (Array.isArray(codes)) {
+        return codes.join(',');
+    }
+    if (typeof codes === 'string') {
+        // 去掉方括号，提取数字
+        return codes.replace(/[\[\]]/g, '').trim() || '403';
+    }
+    if (typeof codes === 'number') {
+        return String(codes);
+    }
+    return '403';
+}
+
+function parseErrorCodesFromInput(input) {
+    // 从用户输入解析错误码数组，支持中英文逗号
+    if (!input) return [403];
+    return input
+        .replace(/，/g, ',')  // 中文逗号转英文
+        .replace(/[\[\]]/g, '')  // 去掉方括号
+        .split(',')
+        .map(c => parseInt(c.trim()))
+        .filter(c => !isNaN(c) && c > 0);
+}
+
+// =====================================================================
 // 凭证管理器工厂
 // =====================================================================
 function createCredsManager(type) {
@@ -2185,10 +2214,10 @@ function populateConfigForm() {
     setConfigField('antigravityApiUrl', c.antigravity_api_url || '');
 
     document.getElementById('autoBanEnabled').checked = Boolean(c.auto_ban_enabled);
-    setConfigField('autoBanErrorCodes', Array.isArray(c.auto_ban_error_codes) ? c.auto_ban_error_codes.join(',') : String(c.auto_ban_error_codes || '403'));
+    setConfigField('autoBanErrorCodes', parseErrorCodesToString(c.auto_ban_error_codes));
 
     document.getElementById('agAutoBanEnabled').checked = Boolean(c.ag_auto_ban_enabled);
-    setConfigField('agAutoBanErrorCodes', Array.isArray(c.ag_auto_ban_error_codes) ? c.ag_auto_ban_error_codes.join(',') : String(c.ag_auto_ban_error_codes || '403'));
+    setConfigField('agAutoBanErrorCodes', parseErrorCodesToString(c.ag_auto_ban_error_codes));
 
     setConfigField('callsPerRotation', c.calls_per_rotation || 10);
 
@@ -2239,11 +2268,9 @@ async function saveConfig() {
             service_usage_api_url: getValue('serviceUsageApiUrl'),
             antigravity_api_url: getValue('antigravityApiUrl'),
             auto_ban_enabled: getChecked('autoBanEnabled'),
-            auto_ban_error_codes: getValue('autoBanErrorCodes').split(',')
-                .map(c => parseInt(c.trim())).filter(c => !isNaN(c)),
+            auto_ban_error_codes: parseErrorCodesFromInput(getValue('autoBanErrorCodes')),
             ag_auto_ban_enabled: getChecked('agAutoBanEnabled'),
-            ag_auto_ban_error_codes: getValue('agAutoBanErrorCodes').split(',')
-                .map(c => parseInt(c.trim())).filter(c => !isNaN(c)),
+            ag_auto_ban_error_codes: parseErrorCodesFromInput(getValue('agAutoBanErrorCodes')),
             calls_per_rotation: getInt('callsPerRotation', 10),
             retry_429_enabled: getChecked('retry429Enabled'),
             retry_429_max_retries: getInt('retry429MaxRetries', 20),
