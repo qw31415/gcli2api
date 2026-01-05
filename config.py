@@ -7,7 +7,9 @@ Centralizes all configuration to avoid duplication across modules.
 """
 
 import os
+import ipaddress
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 # 全局配置缓存
 _config_cache: dict[str, Any] = {}
@@ -184,6 +186,56 @@ async def get_anti_truncation_max_attempts() -> int:
 
 
 # Server Configuration
+def sanitize_server_host(host: Any, default: str = "0.0.0.0") -> str:
+    """
+    Sanitize the bind host value for the HTTP server.
+
+    目标：避免数据库/环境变量写入了 URL、host:port、或异常换行导致服务无法启动。
+
+    仅允许：IPv4/IPv6 地址、localhost。
+    其他值一律回退到 default（默认 0.0.0.0）。
+    """
+    if host is None:
+        return default
+
+    value = str(host).strip()
+    if not value:
+        return default
+
+    # 处理意外的换行/空白（例如复制粘贴导致）
+    value = value.split()[0]
+
+    # 允许 URL（取 hostname）
+    if "://" in value:
+        try:
+            parsed = urlparse(value)
+            if parsed.hostname:
+                value = parsed.hostname
+            else:
+                return default
+        except Exception:
+            return default
+
+    # 允许形如 [::] 的 IPv6
+    if value.startswith("[") and value.endswith("]") and len(value) > 2:
+        value = value[1:-1]
+
+    # 允许形如 0.0.0.0:7861（去掉端口）
+    if value.count(":") == 1:
+        left, right = value.rsplit(":", 1)
+        if right.isdigit():
+            value = left
+
+    if value.lower() == "localhost":
+        return "localhost"
+
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        return default
+
+
 async def get_server_host() -> str:
     """
     Get server host setting.
@@ -192,7 +244,8 @@ async def get_server_host() -> str:
     Database config key: host
     Default: 0.0.0.0
     """
-    return str(await get_config_value("host", "0.0.0.0", "HOST"))
+    raw_value = await get_config_value("host", "0.0.0.0", "HOST")
+    return sanitize_server_host(raw_value, default="0.0.0.0")
 
 
 async def get_server_port() -> int:

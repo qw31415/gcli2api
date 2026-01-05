@@ -1421,6 +1421,8 @@ async def save_config(request: ConfigSaveRequest, token: str = Depends(verify_pa
         if "host" in new_config:
             if not isinstance(new_config["host"], str) or not new_config["host"].strip():
                 raise HTTPException(status_code=400, detail="服务器主机地址不能为空")
+            # 规范化 host（避免存入 URL/host:port/异常换行导致无法启动）
+            new_config["host"] = config.sanitize_server_host(new_config["host"])
 
         if "port" in new_config:
             if (
@@ -1923,8 +1925,11 @@ async def verify_credential_project_common(filename: str, is_antigravity: bool =
     # 如果token被刷新了，更新存储
     if token_refreshed:
         log.info(f"Token已自动刷新: {filename} (is_antigravity={is_antigravity})")
-        credential_data = credentials.to_dict()
-        await storage_adapter.store_credential(filename, credential_data, is_antigravity=is_antigravity)
+        updated_data = dict(credential_data)
+        updated_data.update(credentials.to_dict())
+        Credentials.normalize_dict(updated_data)
+        await storage_adapter.store_credential(filename, updated_data, is_antigravity=is_antigravity)
+        credential_data = updated_data
 
     # 获取API端点和对应的User-Agent
     if is_antigravity:
@@ -2019,18 +2024,22 @@ async def get_antigravity_credential_quota(filename: str, token: str = Depends(v
         if not credential_data:
             raise HTTPException(status_code=404, detail="凭证不存在")
 
-        # 使用 Credentials 对象自动处理 token 刷新
-        from .google_oauth_api import Credentials
-
         creds = Credentials.from_dict(credential_data)
 
         # 自动刷新 token（如果需要）
-        await creds.refresh_if_needed()
+        token_refreshed = await creds.refresh_if_needed()
 
-        # 如果 token 被刷新了，更新存储
-        updated_data = creds.to_dict()
+        # 如果 token 被刷新了/或需要补齐兼容字段，更新存储（保留原有字段）
+        updated_data = dict(credential_data)
+        updated_data.update(creds.to_dict())
+        Credentials.normalize_dict(updated_data)
+
         if updated_data != credential_data:
-            log.info(f"Token已自动刷新: {filename}")
+            if token_refreshed:
+                log.info(f"Token已自动刷新: {filename}")
+            else:
+                log.debug(f"凭证字段已标准化: {filename}")
+
             await storage_adapter.store_credential(filename, updated_data, is_antigravity=True)
             credential_data = updated_data
 
@@ -2063,6 +2072,4 @@ async def get_antigravity_credential_quota(filename: str, token: str = Depends(v
     except Exception as e:
         log.error(f"获取Antigravity凭证额度失败 {filename}: {e}")
         raise HTTPException(status_code=500, detail=f"获取额度失败: {str(e)}")
-
-
 

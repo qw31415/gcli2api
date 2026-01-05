@@ -200,8 +200,10 @@ def _extract_api_token(
 
 
 def _infer_project_and_session(credential_data: Dict[str, Any]) -> tuple[str, str]:
-    project_id = credential_data.get("project_id")
-    session_id = f"session-{uuid.uuid4().hex}"   
+    project_id = credential_data.get("project_id") or credential_data.get("quota_project_id")
+    if not project_id:
+        project_id = f"projects/random-{uuid.uuid4().hex[:8]}/locations/global"
+    session_id = f"session-{uuid.uuid4().hex}"
     return str(project_id), str(session_id)
 
 def _pick_usage_metadata_from_antigravity_response(response_data: Dict[str, Any]) -> Dict[str, Any]:

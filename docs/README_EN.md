@@ -4,13 +4,13 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: CNC-1.0](https://img.shields.io/badge/License-CNC--1.0-red.svg)](../LICENSE)
-[![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/su-kaka/gcli2api/pkgs/container/gcli2api)
+[![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/qw31415/gcli2api/pkgs/container/gcli2api)
 
 [中文](../README.md) | English
 
 ## 🚀 Quick Deploy
 
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/97VMEF?referralCode=su-kaka)
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/97VMEF?referralCode=qw31415)
 ---
 
 ## ⚠️ License Declaration
@@ -192,7 +192,7 @@ All models have 1M context window capacity. Each credential file provides 1000 r
 
 **Initial Installation**
 ```bash
-curl -o termux-install.sh "https://raw.githubusercontent.com/su-kaka/gcli2api/refs/heads/master/termux-install.sh" && chmod +x termux-install.sh && ./termux-install.sh
+curl -o termux-install.sh "https://raw.githubusercontent.com/qw31415/gcli2api/refs/heads/master/termux-install.sh" && chmod +x termux-install.sh && ./termux-install.sh
 ```
 
 **Restart Service**
@@ -205,7 +205,7 @@ bash termux-start.sh
 
 **Initial Installation**
 ```powershell
-iex (iwr "https://raw.githubusercontent.com/su-kaka/gcli2api/refs/heads/master/install.ps1" -UseBasicParsing).Content
+iex (iwr "https://raw.githubusercontent.com/qw31415/gcli2api/refs/heads/master/install.ps1" -UseBasicParsing).Content
 ```
 
 **Restart Service**
@@ -215,7 +215,7 @@ Double-click to execute `start.bat`
 
 **Initial Installation**
 ```bash
-curl -o install.sh "https://raw.githubusercontent.com/su-kaka/gcli2api/refs/heads/master/install.sh" && chmod +x install.sh && ./install.sh
+curl -o install.sh "https://raw.githubusercontent.com/qw31415/gcli2api/refs/heads/master/install.sh" && chmod +x install.sh && ./install.sh
 ```
 
 **Restart Service**
@@ -229,10 +229,10 @@ bash start.sh
 **Docker Run Command**
 ```bash
 # Using universal password
-docker run -d --name gcli2api --network host -e PASSWORD=pwd -e PORT=7861 -v $(pwd)/data/creds:/app/creds ghcr.io/su-kaka/gcli2api:latest
+docker run -d --name gcli2api --network host -e PASSWORD=pwd -e PORT=7861 -v $(pwd)/data/creds:/app/creds ghcr.io/qw31415/gcli2api:latest
 
 # Using separate passwords
-docker run -d --name gcli2api --network host -e API_PASSWORD=api_pwd -e PANEL_PASSWORD=panel_pwd -e PORT=7861 -v $(pwd)/data/creds:/app/creds ghcr.io/su-kaka/gcli2api:latest
+docker run -d --name gcli2api --network host -e API_PASSWORD=api_pwd -e PANEL_PASSWORD=panel_pwd -e PORT=7861 -v $(pwd)/data/creds:/app/creds ghcr.io/qw31415/gcli2api:latest
 ```
 
 **Docker Compose Run Command**
@@ -242,7 +242,7 @@ docker run -d --name gcli2api --network host -e API_PASSWORD=api_pwd -e PANEL_PA
 
     services:
       gcli2api:
-        image: ghcr.io/su-kaka/gcli2api:latest
+        image: ghcr.io/qw31415/gcli2api:latest
         container_name: gcli2api
         restart: unless-stopped
         network_mode: host
@@ -273,6 +273,7 @@ docker run -d --name gcli2api --network host -e API_PASSWORD=api_pwd -e PANEL_PA
 
 - The current OAuth authentication process **only supports localhost access**, meaning authentication must be completed through `http://127.0.0.1:7861/auth` (default port 7861, modifiable via PORT environment variable).
 - **For deployment on cloud servers or other remote environments, please first run the service locally and complete OAuth authentication to obtain the generated json credential files (located in the `./geminicli/creds` directory), then upload these files via the auth panel.**
+- Credential uploads are compatible with `authorized_user` exports (e.g. missing `access_token` / `token` / `expiry`); the service will refresh tokens when needed and treats `quota_project_id` as `project_id`.
 - **Please strictly comply with usage restrictions, only for personal learning and non-commercial purposes**
 
 ---
@@ -365,14 +366,14 @@ docker run -d --name gcli2api \
   -e MONGODB_URI="mongodb://mongodb:27017" \
   -e API_PASSWORD=your_password \
   --network your_network \
-  ghcr.io/su-kaka/gcli2api:latest
+  ghcr.io/qw31415/gcli2api:latest
 
 # Using MongoDB Atlas
 docker run -d --name gcli2api \
   -e MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/gcli2api" \
   -e API_PASSWORD=your_password \
   -p 7861:7861 \
-  ghcr.io/su-kaka/gcli2api:latest
+  ghcr.io/qw31415/gcli2api:latest
 ```
 
 **Docker Compose Example**
@@ -393,7 +394,7 @@ services:
       - "27017:27017"
 
   gcli2api:
-    image: ghcr.io/su-kaka/gcli2api:latest
+    image: ghcr.io/qw31415/gcli2api:latest
     container_name: gcli2api
     restart: unless-stopped
     depends_on:
@@ -522,7 +523,7 @@ export MONGODB_URI="mongodb://localhost:27017/gcli2api?readPreference=secondaryP
 
 **Basic Configuration**
 - `PORT`: Service port (default: 7861)
-- `HOST`: Server listen address (default: 0.0.0.0)
+- `HOST`: Server listen address (default: 0.0.0.0). Only IP/localhost are supported; values like `http://...` or `0.0.0.0:7861` will be sanitized.
 
 **Password Configuration**
 - `API_PASSWORD`: Chat API access password (default: inherits PASSWORD or pwd)
@@ -570,7 +571,7 @@ docker run -d --name gcli2api \
   -e PASSWORD=mypassword \
   -e PORT=11451 \
   -e GOOGLE_CREDENTIALS="$(cat credential.json | base64 -w 0)" \
-  ghcr.io/su-kaka/gcli2api:latest
+  ghcr.io/qw31415/gcli2api:latest
 
 # Using separate passwords
 docker run -d --name gcli2api \
@@ -578,7 +579,7 @@ docker run -d --name gcli2api \
   -e PANEL_PASSWORD=my_panel_password \
   -e PORT=11451 \
   -e GOOGLE_CREDENTIALS="$(cat credential.json | base64 -w 0)" \
-  ghcr.io/su-kaka/gcli2api:latest
+  ghcr.io/qw31415/gcli2api:latest
 ```
 
 Note: When credential environment variables are set, the system will prioritize using credentials from environment variables and ignore files in the `creds` directory.

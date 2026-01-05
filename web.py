@@ -159,7 +159,10 @@ async def main():
 
     # 配置hypercorn
     config = Config()
-    config.bind = [f"{host}:{port}"]
+    bind_host = host
+    if ":" in bind_host and not bind_host.startswith("["):
+        bind_host = f"[{bind_host}]"
+    config.bind = [f"{bind_host}:{port}"]
     config.accesslog = "-"
     config.errorlog = "-"
     config.loglevel = "INFO"

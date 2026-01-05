@@ -34,12 +34,33 @@ class CredentialManager:
 
             # 初始化统一存储适配器
             self._storage_adapter = await get_storage_adapter()
+            self._initialized = True
 
     async def close(self):
         """清理资源"""
         log.debug("Closing credential manager...")
         self._initialized = False
         log.debug("Credential manager closed")
+
+    async def _normalize_and_persist_credential(
+        self,
+        filename: str,
+        credential_data: Dict[str, Any],
+        *,
+        is_antigravity: bool = False,
+    ) -> Dict[str, Any]:
+        """标准化凭证数据并在需要时持久化（保持兼容字段不丢失）。"""
+        if not isinstance(credential_data, dict):
+            return credential_data
+
+        before = dict(credential_data)
+        Credentials.normalize_dict(credential_data)
+
+        if credential_data != before:
+            await self._storage_adapter.store_credential(
+                filename, credential_data, is_antigravity=is_antigravity
+            )
+        return credential_data
 
     async def get_valid_credential(
         self, is_antigravity: bool = False, model_key: Optional[str] = None
@@ -63,6 +84,12 @@ class CredentialManager:
                 )
                 if result:
                     filename, credential_data = result
+
+                    # 兼容导入凭证：补齐 project_id / token / access_token 等字段
+                    credential_data = await self._normalize_and_persist_credential(
+                        filename, credential_data, is_antigravity=is_antigravity
+                    )
+
                     # Token 刷新检查
                     if await self._should_refresh_token(credential_data):
                         log.debug(f"Token需要刷新 - 文件: {filename} (antigravity={is_antigravity})")
@@ -123,6 +150,11 @@ class CredentialManager:
                 if not credential_data:
                     continue
 
+                # 兼容导入凭证：补齐 project_id / token / access_token 等字段
+                credential_data = await self._normalize_and_persist_credential(
+                    filename, credential_data, is_antigravity=is_antigravity
+                )
+
                 # Token 刷新
                 if await self._should_refresh_token(credential_data):
                     refreshed_data = await self._refresh_token(credential_data, filename, is_antigravity=is_antigravity)
@@ -139,23 +171,37 @@ class CredentialManager:
 
         return None
 
-    async def add_credential(self, credential_name: str, credential_data: Dict[str, Any]):
+    async def add_credential(
+        self,
+        credential_name: str,
+        credential_data: Dict[str, Any],
+        is_antigravity: bool = False,
+    ) -> bool:
         """
         新增或更新一个凭证
         存储层会自动处理轮换顺序
         """
         async with self._operation_lock:
-            await self._storage_adapter.store_credential(credential_name, credential_data)
-            log.info(f"Credential added/updated: {credential_name}")
+            if not isinstance(credential_data, dict):
+                raise TypeError("credential_data must be a dict")
+
+            # 兼容导入凭证：补齐 project_id / token / access_token 等字段
+            Credentials.normalize_dict(credential_data)
+
+            success = await self._storage_adapter.store_credential(
+                credential_name, credential_data, is_antigravity=is_antigravity
+            )
+            log.info(
+                f"Credential added/updated: {credential_name} (antigravity={is_antigravity})"
+            )
+            return bool(success)
 
     async def add_antigravity_credential(self, credential_name: str, credential_data: Dict[str, Any]):
         """
         新增或更新一个Antigravity凭证
         存储层会自动处理轮换顺序
         """
-        async with self._operation_lock:
-            await self._storage_adapter.store_credential(credential_name, credential_data, is_antigravity=True)
-            log.info(f"Antigravity credential added/updated: {credential_name}")
+        return await self.add_credential(credential_name, credential_data, is_antigravity=True)
 
     async def remove_credential(self, credential_name: str) -> bool:
         """删除一个凭证"""
@@ -267,8 +313,12 @@ class CredentialManager:
             # 如果 token 被刷新了，更新存储
             if token_refreshed:
                 log.info(f"Token已自动刷新: {credential_name} (is_antigravity={is_antigravity})")
-                updated_data = credentials.to_dict()
-                await self._storage_adapter.store_credential(credential_name, updated_data, is_antigravity=is_antigravity)
+                updated_data = dict(credential_data)
+                updated_data.update(credentials.to_dict())
+                Credentials.normalize_dict(updated_data)
+                await self._storage_adapter.store_credential(
+                    credential_name, updated_data, is_antigravity=is_antigravity
+                )
 
             # 获取邮箱
             email = await get_user_email(credentials)
@@ -434,6 +484,9 @@ class CredentialManager:
                 credential_data["access_token"] = creds.access_token
                 # 保持兼容性
                 credential_data["token"] = creds.access_token
+
+            if creds.project_id and not credential_data.get("project_id"):
+                credential_data["project_id"] = creds.project_id
 
             if creds.expires_at:
                 credential_data["expiry"] = creds.expires_at.isoformat()

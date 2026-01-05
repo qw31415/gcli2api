@@ -151,10 +151,38 @@ class Credentials:
             project_id=data.get("project_id") or data.get("quota_project_id"),
         )
 
+    @staticmethod
+    def normalize_dict(data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化第三方/导入的凭证格式（就地修改）。
+
+        兼容场景：
+        - 只有 `quota_project_id` 没有 `project_id`
+        - 只有 `token` 或只有 `access_token`
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # quota_project_id -> project_id（保持向后兼容，不删除原字段）
+        if not data.get("project_id") and data.get("quota_project_id"):
+            data["project_id"] = data["quota_project_id"]
+
+        # token <-> access_token（保证两者至少一致存在一个）
+        access_token = data.get("access_token") or data.get("token")
+        if access_token:
+            if not data.get("access_token"):
+                data["access_token"] = access_token
+            if not data.get("token"):
+                data["token"] = access_token
+
+        return data
+
     def to_dict(self) -> Dict[str, Any]:
         """转为字典"""
         result = {
             "access_token": self.access_token,
+            # 保持兼容性：部分上游/历史逻辑使用 token 字段
+            "token": self.access_token,
             "refresh_token": self.refresh_token,
             "client_id": self.client_id,
             "client_secret": self.client_secret,
@@ -777,5 +805,4 @@ async def _get_onboard_tier(
     else:
         log.error(f"[_get_onboard_tier] Failed to fetch tier info: HTTP {response.status_code}")
         return None
-
 
