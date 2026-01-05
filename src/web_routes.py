@@ -11,7 +11,7 @@ import os
 import time
 import zipfile
 from collections import deque
-from typing import List
+from typing import Callable, List
 
 from fastapi import (
     APIRouter,
@@ -23,6 +23,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.routing import APIRoute
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 from starlette.websockets import WebSocketState
@@ -53,8 +54,30 @@ from .antigravity_api import fetch_quota_info
 from .google_oauth_api import Credentials, fetch_project_id
 from config import get_code_assist_endpoint, get_antigravity_api_url
 
+MAX_MULTIPART_FILES = 50000
+MAX_MULTIPART_FIELDS = 50000
+
+
+class LargeMultipartFormRoute(APIRoute):
+    """增加 multipart/form-data 文件/字段数量限制（Starlette 默认 1000）。"""
+
+    def get_route_handler(self) -> Callable:
+        original_route_handler = super().get_route_handler()
+
+        async def custom_route_handler(request: Request) -> Response:
+            content_type = request.headers.get("content-type", "")
+            if content_type.startswith("multipart/form-data"):
+                await request.form(
+                    max_files=MAX_MULTIPART_FILES,
+                    max_fields=MAX_MULTIPART_FIELDS,
+                )
+            return await original_route_handler(request)
+
+        return custom_route_handler
+
+
 # 创建路由器
-router = APIRouter()
+router = APIRouter(route_class=LargeMultipartFormRoute)
 
 # 创建credential manager实例
 credential_manager = CredentialManager()

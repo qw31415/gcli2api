@@ -341,6 +341,8 @@ function createUploadManager(type) {
     return {
         type: type,
         selectedFiles: [],
+        maxVisibleFiles: 20,
+        showAllFiles: false,
 
         getElementId: (suffix) => {
             // 普通上传的ID首字母小写,如 fileList
@@ -380,15 +382,27 @@ function createUploadManager(type) {
                 return;
             }
 
-            if (this.selectedFiles.length === 0) {
+            const totalFiles = this.selectedFiles.length;
+
+            if (totalFiles === 0) {
                 section.classList.add('hidden');
+                this.showAllFiles = false;
                 return;
             }
+
+            const shouldCollapse = totalFiles > this.maxVisibleFiles;
+            if (!shouldCollapse) {
+                this.showAllFiles = false;
+            }
+
+            const filesToRender = shouldCollapse && !this.showAllFiles
+                ? this.selectedFiles.slice(0, this.maxVisibleFiles)
+                : this.selectedFiles;
 
             section.classList.remove('hidden');
             list.innerHTML = '';
 
-            this.selectedFiles.forEach((file, index) => {
+            filesToRender.forEach((file, index) => {
                 const isZip = file.name.endsWith('.zip');
                 const fileIcon = isZip ? '📦' : '📄';
                 const fileType = isZip ? ' (ZIP压缩包)' : ' (JSON文件)';
@@ -404,6 +418,30 @@ function createUploadManager(type) {
                 `;
                 list.appendChild(fileItem);
             });
+
+            if (shouldCollapse) {
+                const hiddenCount = totalFiles - this.maxVisibleFiles;
+                const message = this.showAllFiles
+                    ? `已显示全部 ${totalFiles} 个文件（点击收起，仅显示前 ${this.maxVisibleFiles} 个）`
+                    : `已选择 ${totalFiles} 个文件，仅显示前 ${this.maxVisibleFiles} 个（剩余 ${hiddenCount} 个已折叠）`;
+                const buttonText = this.showAllFiles ? '收起' : '展开全部';
+
+                const toggle = document.createElement('div');
+                toggle.className = 'file-list-toggle';
+                if (isAntigravity) {
+                    toggle.classList.add('antigravity');
+                }
+                toggle.innerHTML = `
+                    <span class="file-list-toggle-text">${message}</span>
+                    <button class="file-list-toggle-btn" type="button">${buttonText}</button>
+                `;
+                const self = this;
+                toggle.querySelector('button').addEventListener('click', () => {
+                    self.showAllFiles = !self.showAllFiles;
+                    self.updateFileList();
+                });
+                list.appendChild(toggle);
+            }
         },
 
         removeFile(index) {
@@ -413,6 +451,7 @@ function createUploadManager(type) {
 
         clearFiles() {
             this.selectedFiles = [];
+            this.showAllFiles = false;
             this.updateFileList();
         },
 

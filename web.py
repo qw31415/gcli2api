@@ -6,15 +6,9 @@ Main Web Integration - Integrates all routers and modules
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.formparsers import MultiPartParser
-
-# 增加文件上传数量限制 (默认1000)
-MultiPartParser.max_file_size = 1024 * 1024 * 100  # 100MB per file
-MultiPartParser.max_files = 10000  # 最多 10000 个文件
-
 from config import get_server_host, get_server_port
 from log import log
 
@@ -27,7 +21,7 @@ from src.antigravity_router import router as antigravity_router
 from src.antigravity_anthropic_router import router as antigravity_anthropic_router
 from src.openai_router import router as openai_router
 from src.task_manager import shutdown_all_tasks
-from src.web_routes import router as web_router
+from src.web_routes import LargeMultipartFormRoute, router as web_router
 
 # 全局凭证管理器
 global_credential_manager = None
@@ -89,6 +83,9 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+# 文件上传数量限制（Starlette multipart 默认 max_files/max_fields=1000）
+app.router.route_class = LargeMultipartFormRoute
 
 # CORS中间件
 app.add_middleware(
