@@ -148,7 +148,7 @@ class Credentials:
             client_id=data.get("client_id"),
             client_secret=data.get("client_secret"),
             expires_at=expires_at,
-            project_id=data.get("project_id"),
+            project_id=data.get("project_id") or data.get("quota_project_id"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
