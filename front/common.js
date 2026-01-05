@@ -2185,10 +2185,10 @@ function populateConfigForm() {
     setConfigField('antigravityApiUrl', c.antigravity_api_url || '');
 
     document.getElementById('autoBanEnabled').checked = Boolean(c.auto_ban_enabled);
-    setConfigField('autoBanErrorCodes', (c.auto_ban_error_codes || []).join(','));
+    setConfigField('autoBanErrorCodes', Array.isArray(c.auto_ban_error_codes) ? c.auto_ban_error_codes.join(',') : String(c.auto_ban_error_codes || '403'));
 
     document.getElementById('agAutoBanEnabled').checked = Boolean(c.ag_auto_ban_enabled);
-    setConfigField('agAutoBanErrorCodes', (c.ag_auto_ban_error_codes || []).join(','));
+    setConfigField('agAutoBanErrorCodes', Array.isArray(c.ag_auto_ban_error_codes) ? c.ag_auto_ban_error_codes.join(',') : String(c.ag_auto_ban_error_codes || '403'));
 
     setConfigField('callsPerRotation', c.calls_per_rotation || 10);
 
