@@ -407,6 +407,37 @@ async def get_return_thoughts_to_frontend() -> bool:
     return bool(await get_config_value("return_thoughts_to_frontend", True))
 
 
+def sanitize_api_url(url: Any, default: str) -> str:
+    """
+    Sanitize API URL value.
+
+    确保 URL 包含有效协议，无效值返回默认值。
+    """
+    if url is None:
+        return default
+
+    value = str(url).strip()
+    if not value:
+        return default
+
+    # 过滤带引号的空字符串
+    if value in ('""', "''", '""', "''"):
+        return default
+
+    # 去除首尾引号
+    if (value.startswith('"') and value.endswith('"')) or \
+       (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1].strip()
+        if not value:
+            return default
+
+    # URL 必须包含协议
+    if not value.startswith(("http://", "https://")):
+        return default
+
+    return value.rstrip("/")
+
+
 async def get_oauth_proxy_url() -> str:
     """
     Get OAuth proxy URL setting.
@@ -417,11 +448,9 @@ async def get_oauth_proxy_url() -> str:
     Database config key: oauth_proxy_url
     Default: https://oauth2.googleapis.com
     """
-    return str(
-        await get_config_value(
-            "oauth_proxy_url", "https://oauth2.googleapis.com", "OAUTH_PROXY_URL"
-        )
-    )
+    default = "https://oauth2.googleapis.com"
+    raw_value = await get_config_value("oauth_proxy_url", default, "OAUTH_PROXY_URL")
+    return sanitize_api_url(raw_value, default)
 
 
 async def get_googleapis_proxy_url() -> str:
@@ -434,11 +463,9 @@ async def get_googleapis_proxy_url() -> str:
     Database config key: googleapis_proxy_url
     Default: https://www.googleapis.com
     """
-    return str(
-        await get_config_value(
-            "googleapis_proxy_url", "https://www.googleapis.com", "GOOGLEAPIS_PROXY_URL"
-        )
-    )
+    default = "https://www.googleapis.com"
+    raw_value = await get_config_value("googleapis_proxy_url", default, "GOOGLEAPIS_PROXY_URL")
+    return sanitize_api_url(raw_value, default)
 
 
 async def get_resource_manager_api_url() -> str:
@@ -451,13 +478,9 @@ async def get_resource_manager_api_url() -> str:
     Database config key: resource_manager_api_url
     Default: https://cloudresourcemanager.googleapis.com
     """
-    return str(
-        await get_config_value(
-            "resource_manager_api_url",
-            "https://cloudresourcemanager.googleapis.com",
-            "RESOURCE_MANAGER_API_URL",
-        )
-    )
+    default = "https://cloudresourcemanager.googleapis.com"
+    raw_value = await get_config_value("resource_manager_api_url", default, "RESOURCE_MANAGER_API_URL")
+    return sanitize_api_url(raw_value, default)
 
 
 async def get_service_usage_api_url() -> str:
@@ -470,11 +493,9 @@ async def get_service_usage_api_url() -> str:
     Database config key: service_usage_api_url
     Default: https://serviceusage.googleapis.com
     """
-    return str(
-        await get_config_value(
-            "service_usage_api_url", "https://serviceusage.googleapis.com", "SERVICE_USAGE_API_URL"
-        )
-    )
+    default = "https://serviceusage.googleapis.com"
+    raw_value = await get_config_value("service_usage_api_url", default, "SERVICE_USAGE_API_URL")
+    return sanitize_api_url(raw_value, default)
 
 
 async def get_antigravity_api_url() -> str:
@@ -487,10 +508,6 @@ async def get_antigravity_api_url() -> str:
     Database config key: antigravity_api_url
     Default: https://daily-cloudcode-pa.sandbox.googleapis.com
     """
-    return str(
-        await get_config_value(
-            "antigravity_api_url",
-            "https://daily-cloudcode-pa.sandbox.googleapis.com",
-            "ANTIGRAVITY_API_URL",
-        )
-    )
+    default = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    raw_value = await get_config_value("antigravity_api_url", default, "ANTIGRAVITY_API_URL")
+    return sanitize_api_url(raw_value, default)
