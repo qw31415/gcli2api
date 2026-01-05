@@ -133,9 +133,12 @@ async def get_auto_ban_enabled() -> bool:
 
 
 def _parse_error_codes(codes: Any) -> Optional[list]:
-    """Parse error codes from various formats (list, string, etc.)."""
+    """Parse error codes from various formats (list, string, int, etc.)."""
     if codes is None:
         return None
+    # 处理单个整数
+    if isinstance(codes, (int, float)):
+        return [int(codes)]
     if isinstance(codes, list):
         try:
             return [int(c) for c in codes if str(c).strip()]
