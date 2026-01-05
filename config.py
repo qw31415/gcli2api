@@ -132,17 +132,47 @@ async def get_auto_ban_enabled() -> bool:
     return bool(await get_config_value("auto_ban_enabled", False))
 
 
+def _parse_error_codes(codes: Any) -> Optional[list]:
+    """Parse error codes from various formats (list, string, etc.)."""
+    if codes is None:
+        return None
+    if isinstance(codes, list):
+        try:
+            return [int(c) for c in codes if str(c).strip()]
+        except (ValueError, TypeError):
+            return None
+    if isinstance(codes, str):
+        codes = codes.strip()
+        if not codes:
+            return None
+        # 处理 JSON 数组字符串 "[403, 429]"
+        if codes.startswith("[") and codes.endswith("]"):
+            try:
+                import json
+                parsed = json.loads(codes)
+                if isinstance(parsed, list):
+                    return [int(c) for c in parsed]
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+        # 处理逗号分隔字符串 "403,429"
+        try:
+            return [int(c.strip()) for c in codes.split(",") if c.strip()]
+        except ValueError:
+            return None
+    return None
+
+
 async def get_auto_ban_error_codes() -> list:
     """Get GCLI auto ban error codes."""
     env_value = os.getenv("AUTO_BAN_ERROR_CODES")
     if env_value:
-        try:
-            return [int(code.strip()) for code in env_value.split(",") if code.strip()]
-        except ValueError:
-            pass
+        parsed = _parse_error_codes(env_value)
+        if parsed is not None:
+            return parsed
     codes = await get_config_value("auto_ban_error_codes")
-    if codes and isinstance(codes, list):
-        return codes
+    parsed = _parse_error_codes(codes)
+    if parsed is not None:
+        return parsed
     return AUTO_BAN_ERROR_CODES
 
 
@@ -158,13 +188,13 @@ async def get_ag_auto_ban_error_codes() -> list:
     """Get Antigravity auto ban error codes."""
     env_value = os.getenv("AG_AUTO_BAN_ERROR_CODES")
     if env_value:
-        try:
-            return [int(code.strip()) for code in env_value.split(",") if code.strip()]
-        except ValueError:
-            pass
+        parsed = _parse_error_codes(env_value)
+        if parsed is not None:
+            return parsed
     codes = await get_config_value("ag_auto_ban_error_codes")
-    if codes and isinstance(codes, list):
-        return codes
+    parsed = _parse_error_codes(codes)
+    if parsed is not None:
+        return parsed
     return AUTO_BAN_ERROR_CODES
 
 
