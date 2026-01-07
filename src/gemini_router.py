@@ -32,7 +32,6 @@ from .task_manager import create_managed_task
 router = APIRouter()
 
 @router.get("/v1beta/models")
-@router.get("/v1/models")
 async def list_gemini_models(token: str = Depends(authenticate_gemini_flexible)):
     """返回Gemini格式的模型列表"""
     models = get_available_models("gemini")

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from config import get_anti_truncation_max_attempts
+from config import get_anti_truncation_max_attempts, get_api_password
 from log import log
 from .utils import is_anti_truncation_model, authenticate_bearer, authenticate_gemini_flexible, authenticate_sdwebui_flexible, get_base_model_from_feature_model
 from .antigravity_api import (
@@ -776,29 +776,78 @@ async def convert_antigravity_stream_to_gemini(
             log.debug(f"[ANTIGRAVITY GEMINI] Error closing client: {e}")
 
 
-@router.get("/antigravity/v1/models", response_model=ModelList)
-async def list_models():
-    """返回 OpenAI 格式的模型列表 - 动态从 Antigravity API 获取"""
+@router.get("/antigravity/v1beta/models")
+@router.get("/antigravity/v1/models")
+async def list_models(request: Request):
+    """
+    返回模型列表（兼容 OpenAI / Gemini 两种格式）
 
+    - OpenAI: `Authorization: Bearer <pwd>`（也允许不带鉴权）-> `{"object":"list","data":[...]}`
+    - Gemini: `?key=<pwd>` 或 `x-goog-api-key: <pwd>` -> `{"models":[...]}`
+    """
+    # Gemini 风格鉴权（优先）：key 参数 / x-goog-api-key 头
+    key = request.query_params.get("key")
+    x_goog_api_key = request.headers.get("x-goog-api-key")
+    if key is not None or x_goog_api_key is not None:
+        password = await get_api_password()
+        if not ((key and key == password) or (x_goog_api_key and x_goog_api_key == password)):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing or invalid authentication. Use 'key' URL parameter, 'x-goog-api-key' header, or 'Authorization: Bearer <token>'",
+            )
+
+        try:
+            cred_mgr = await get_credential_manager()
+            models = await fetch_available_models(cred_mgr)
+
+            if not models:
+                log.warning(
+                    "[ANTIGRAVITY GEMINI] Failed to fetch models from API, returning empty list"
+                )
+                return JSONResponse(content={"models": []})
+
+            gemini_models = []
+            for model in models:
+                model_id = model.get("id", "")
+                gemini_models.append(
+                    {
+                        "name": f"models/{model_id}",
+                        "version": "001",
+                        "displayName": model_id,
+                        "description": f"Antigravity API - {model_id}",
+                        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+                    }
+                )
+
+                anti_truncation_id = f"流式抗截断/{model_id}"
+                gemini_models.append(
+                    {
+                        "name": f"models/{anti_truncation_id}",
+                        "version": "001",
+                        "displayName": anti_truncation_id,
+                        "description": f"Antigravity API - {anti_truncation_id} (带流式抗截断功能)",
+                        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+                    }
+                )
+
+            return JSONResponse(content={"models": gemini_models})
+
+        except Exception as e:
+            log.error(f"[ANTIGRAVITY GEMINI] Error fetching models: {e}")
+            return JSONResponse(content={"models": []})
+
+    # OpenAI 风格：默认返回 OpenAI 格式（兼容 base_url=/antigravity/v1 的 OpenAI SDK）
     try:
-        # 获取凭证管理器
         cred_mgr = await get_credential_manager()
-
-        # 从 Antigravity API 获取模型列表（返回 OpenAI 格式的字典列表）
         models = await fetch_available_models(cred_mgr)
 
         if not models:
-            # 如果获取失败，直接返回空列表
             log.warning("[ANTIGRAVITY] Failed to fetch models from API, returning empty list")
             return ModelList(data=[])
 
-        # models 已经是 OpenAI 格式的字典列表，扩展为包含抗截断版本
         expanded_models = []
         for model in models:
-            # 添加原始模型
             expanded_models.append(Model(**model))
-
-            # 添加流式抗截断版本
             anti_truncation_model = model.copy()
             anti_truncation_model["id"] = f"流式抗截断/{model['id']}"
             expanded_models.append(Model(**anti_truncation_model))
@@ -807,7 +856,6 @@ async def list_models():
 
     except Exception as e:
         log.error(f"[ANTIGRAVITY] Error fetching models: {e}")
-        # 返回空列表
         return ModelList(data=[])
 
 
@@ -972,55 +1020,6 @@ async def chat_completions(
 
 
 # ==================== Gemini 格式 API 端点 ====================
-
-@router.get("/antigravity/v1beta/models")
-@router.get("/antigravity/v1/models")
-async def gemini_list_models(api_key: str = Depends(authenticate_gemini_flexible)):
-    """返回 Gemini 格式的模型列表 - 动态从 Antigravity API 获取"""
-
-    try:
-        # 获取凭证管理器
-        cred_mgr = await get_credential_manager()
-
-        # 从 Antigravity API 获取模型列表（返回 OpenAI 格式的字典列表）
-        models = await fetch_available_models(cred_mgr)
-
-        if not models:
-            # 如果获取失败，返回空列表
-            log.warning("[ANTIGRAVITY GEMINI] Failed to fetch models from API, returning empty list")
-            return JSONResponse(content={"models": []})
-
-        # 将 OpenAI 格式转换为 Gemini 格式，同时添加抗截断版本
-        gemini_models = []
-        for model in models:
-            model_id = model.get("id", "")
-
-            # 添加原始模型
-            gemini_models.append({
-                "name": f"models/{model_id}",
-                "version": "001",
-                "displayName": model_id,
-                "description": f"Antigravity API - {model_id}",
-                "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-            })
-
-            # 添加流式抗截断版本
-            anti_truncation_id = f"流式抗截断/{model_id}"
-            gemini_models.append({
-                "name": f"models/{anti_truncation_id}",
-                "version": "001",
-                "displayName": anti_truncation_id,
-                "description": f"Antigravity API - {anti_truncation_id} (带流式抗截断功能)",
-                "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-            })
-
-        return JSONResponse(content={"models": gemini_models})
-
-    except Exception as e:
-        log.error(f"[ANTIGRAVITY GEMINI] Error fetching models: {e}")
-        # 返回空列表
-        return JSONResponse(content={"models": []})
-
 
 @router.post("/antigravity/v1beta/models/{model:path}:generateContent")
 @router.post("/antigravity/v1/models/{model:path}:generateContent")
@@ -1506,4 +1505,3 @@ async def sdwebui_txt2img(request: Request, _: str = Depends(authenticate_sdwebu
     except Exception as e:
         log.error(f"[ANTIGRAVITY SD-WebUI] txt2img request failed: {e}")
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
-

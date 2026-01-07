@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from config import (
     get_anti_truncation_max_attempts,
+    get_api_password,
 )
 from src.utils import (
     get_available_models,
@@ -51,8 +52,50 @@ async def get_credential_manager():
     return credential_manager
 
 @router.get("/v1/models", response_model=ModelList)
-async def list_models(token: str = Depends(authenticate_bearer)):
-    """返回OpenAI格式的模型列表"""
+async def list_models(request: Request):
+    """
+    返回模型列表（兼容 OpenAI / Gemini 两种格式）
+
+    - OpenAI: `Authorization: Bearer <pwd>` -> `{"object":"list","data":[...]}`
+    - Gemini: `?key=<pwd>` 或 `x-goog-api-key: <pwd>` -> `{"models":[...]}`
+    """
+    # Gemini 风格鉴权（优先）：key 参数 / x-goog-api-key 头
+    key = request.query_params.get("key")
+    x_goog_api_key = request.headers.get("x-goog-api-key")
+    if key is not None or x_goog_api_key is not None:
+        password = await get_api_password()
+        if (key and key == password) or (x_goog_api_key and x_goog_api_key == password):
+            models = get_available_models("gemini")
+
+            gemini_models = []
+            for model_name in models:
+                base_model = get_base_model_from_feature_model(model_name)
+                gemini_models.append(
+                    {
+                        "name": f"models/{model_name}",
+                        "baseModelId": base_model,
+                        "version": "001",
+                        "displayName": model_name,
+                        "description": f"Gemini {base_model} model",
+                        "inputTokenLimit": 1000000,
+                        "outputTokenLimit": 8192,
+                        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+                        "temperature": 1.0,
+                        "maxTemperature": 2.0,
+                        "topP": 0.95,
+                        "topK": 64,
+                    }
+                )
+
+            return JSONResponse(content={"models": gemini_models})
+
+        raise HTTPException(
+            status_code=400,
+            detail="Missing or invalid authentication. Use 'key' URL parameter, 'x-goog-api-key' header, or 'Authorization: Bearer <token>'",
+        )
+
+    # OpenAI 风格鉴权：Authorization Bearer
+    await authenticate_bearer(request.headers.get("authorization"))
     models = get_available_models("openai")
     return ModelList(data=[Model(id=m) for m in models])
 
