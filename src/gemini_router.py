@@ -156,6 +156,10 @@ async def generate_content(
     # 发送请求（429重试已在google_api_client中处理）
     response = await send_gemini_request(api_payload, False, cred_mgr)
 
+    # 非流式：上游失败时直接透传（避免错误被包装成 200）
+    if getattr(response, "status_code", 200) != 200:
+        return response
+
     # 处理响应
     try:
         if hasattr(response, "body"):

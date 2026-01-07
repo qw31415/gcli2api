@@ -67,13 +67,13 @@ def _get_cached_config(key: str, default: Any = None) -> Any:
 
 async def get_config_value(key: str, default: Any = None, env_var: Optional[str] = None) -> Any:
     """Get configuration value with priority: ENV > Storage > default."""
-    # 确保配置已初始化
-    if not _config_initialized:
-        await init_config()
-
     # Priority 1: Environment variable
     if env_var and os.getenv(env_var):
         return os.getenv(env_var)
+
+    # 确保配置已初始化（仅当环境变量未命中时才初始化存储）
+    if not _config_initialized:
+        await init_config()
 
     # Priority 2: Memory cache
     value = _get_cached_config(key)
@@ -98,6 +98,10 @@ def sanitize_proxy_url(proxy: Any) -> Optional[str]:
 
     value = str(proxy).strip()
     if not value:
+        return None
+
+    # 禁止包含换行等控制字符，避免被误设置成多行代理导致 HTTP 客户端解析失败
+    if any(ch in value for ch in ("\n", "\r", "\t")):
         return None
 
     # 过滤带引号的空字符串 "" 或 ''
@@ -341,12 +345,11 @@ async def get_api_password() -> str:
     Database config key: api_password
     Default: Uses PASSWORD env var for compatibility, otherwise 'pwd'
     """
-    # 优先使用 API_PASSWORD，如果没有则使用通用 PASSWORD 保证兼容性
+    # 专用密码优先，其次回退到通用密码（保持历史行为）
     api_password = await get_config_value("api_password", None, "API_PASSWORD")
     if api_password is not None:
         return str(api_password)
 
-    # 兼容性：使用通用密码
     return str(await get_config_value("password", "pwd", "PASSWORD"))
 
 
@@ -358,12 +361,11 @@ async def get_panel_password() -> str:
     Database config key: panel_password
     Default: Uses PASSWORD env var for compatibility, otherwise 'pwd'
     """
-    # 优先使用 PANEL_PASSWORD，如果没有则使用通用 PASSWORD 保证兼容性
+    # 专用密码优先，其次回退到通用密码（保持历史行为）
     panel_password = await get_config_value("panel_password", None, "PANEL_PASSWORD")
     if panel_password is not None:
         return str(panel_password)
 
-    # 兼容性：使用通用密码
     return str(await get_config_value("password", "pwd", "PASSWORD"))
 
 

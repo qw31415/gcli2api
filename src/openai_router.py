@@ -182,6 +182,10 @@ async def chat_completions(
     if is_streaming:
         return await convert_streaming_response(response, model)
 
+    # 非流式：上游失败时透传错误（避免返回 200 + choices=[] 造成“模型无法调用”的假成功）
+    if getattr(response, "status_code", 200) != 200:
+        return response
+
     # 转换非流式响应
     try:
         if hasattr(response, "body"):
@@ -380,6 +384,7 @@ async def fake_stream_response(api_payload: dict, cred_mgr: CredentialManager) -
 async def convert_streaming_response(gemini_response, model: str) -> StreamingResponse:
     """转换流式响应为OpenAI格式"""
     response_id = str(uuid.uuid4())
+    upstream_status = getattr(gemini_response, "status_code", 200)
 
     async def openai_stream_generator():
         try:
@@ -447,4 +452,6 @@ async def convert_streaming_response(gemini_response, model: str) -> StreamingRe
             yield f"data: {json.dumps(error_chunk)}\n\n".encode()
             yield "data: [DONE]\n\n".encode()
 
-    return StreamingResponse(openai_stream_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        openai_stream_generator(), media_type="text/event-stream", status_code=upstream_status
+    )

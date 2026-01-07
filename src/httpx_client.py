@@ -18,7 +18,9 @@ class HttpxClientManager:
 
     async def get_client_kwargs(self, timeout: float = 30.0, **kwargs) -> Dict[str, Any]:
         """获取httpx客户端的通用配置参数"""
-        client_kwargs = {"timeout": timeout, **kwargs}
+        # 默认不信任系统环境代理（http_proxy/https_proxy），统一由本项目的 PROXY 配置管理。
+        # 这样可以避免环境变量被意外设置为非法值导致所有请求失败。
+        client_kwargs = {"timeout": timeout, "trust_env": False, **kwargs}
 
         # 动态读取代理配置，支持热更新
         current_proxy_config = await get_proxy_config()
